@@ -101,8 +101,8 @@ static int can_rcv(struct sk_buff *skb, struct net_device *dev,
 		   struct packet_type *pt);
 #endif
 static int can_rcv_filter(struct rcv_dev_list *q, struct sk_buff *skb);
-static struct rcv_list **find_rcv_list(canid_t *can_id, canid_t *mask,
-				       struct net_device *dev);
+static struct hlist_head *find_rcv_list(canid_t *can_id, canid_t *mask,
+					struct net_device *dev);
 
 struct notifier_list {
 	struct notifier_list *next;
@@ -113,7 +113,7 @@ struct notifier_list {
 
 static struct notifier_list *nlist;
 
-struct rcv_dev_list *rx_dev_list;
+HLIST_HEAD(rx_dev_list);
 struct rcv_dev_list rx_alldev_list;
 rwlock_t rcv_lists_lock = RW_LOCK_UNLOCKED;
 
@@ -425,7 +425,9 @@ void can_rx_register(struct net_device *dev, canid_t can_id, canid_t mask,
 		     void (*func)(struct sk_buff *, void *), void *data,
 		     char *ident)
 {
-	struct rcv_list *p, **q;
+	struct rcv_list *p;
+	struct hlist_head *q;
+	struct hlist_node *n;
 	struct rcv_dev_list *d;
 
 	DBG("dev %p, id %03X, mask %03X, callback %p, data %p, ident %s\n",
@@ -452,15 +454,17 @@ void can_rx_register(struct net_device *dev, canid_t can_id, canid_t mask,
 	p->func    = func;
 	p->data    = data;
 	p->ident   = ident;
-	p->next = *q;
-	*q = p;
+
+	hlist_add_head(&p->list, q);
 
 	if (!dev)
 		d = &rx_alldev_list;
-	else
-		for (d = rx_dev_list; d; d = d->next)
+	else {
+		d = NULL;
+		hlist_for_each_entry(d, n, &rx_dev_list, list)
 			if (d->dev == dev)
 				break;
+	}
 	d->entries++;
 
 	pstats.rcv_entries++;
@@ -474,7 +478,9 @@ void can_rx_register(struct net_device *dev, canid_t can_id, canid_t mask,
 void can_rx_unregister(struct net_device *dev, canid_t can_id, canid_t mask,
 		       void (*func)(struct sk_buff *, void *), void *data)
 {
-	struct rcv_list *p, **q;
+	struct rcv_list *p;
+	struct hlist_head *q;
+	struct hlist_node *n;
 	struct rcv_dev_list *d;
 
 	DBG("dev %p, id %03X, mask %03X, callback %p, data %p\n",
@@ -490,7 +496,8 @@ void can_rx_unregister(struct net_device *dev, canid_t can_id, canid_t mask,
 		goto out;
 	}
 
-	for (; p = *q; q = &p->next) {
+	p = NULL;
+	hlist_for_each_entry(p, n, q, list) {
 		if (p->can_id == can_id && p->mask == mask
 		    && p->func == func && p->data == data)
 			break;
@@ -502,7 +509,7 @@ void can_rx_unregister(struct net_device *dev, canid_t can_id, canid_t mask,
 		goto out;
 	}
 
-	*q = p->next;
+	hlist_del(&p->list);
 	kfree(p);
 
 	if (pstats.rcv_entries > 0)
@@ -510,10 +517,12 @@ void can_rx_unregister(struct net_device *dev, canid_t can_id, canid_t mask,
 
 	if (!dev)
 		d = &rx_alldev_list;
-	else
-		for (d = rx_dev_list; d; d = d->next)
+	else {
+		d = NULL;
+		hlist_for_each_entry(d, n, &rx_dev_list, list)
 			if (d->dev == dev)
 				break;
+	}
 	d->entries--;
 
 	if (!d->entries)
@@ -532,6 +541,7 @@ static int can_rcv(struct sk_buff *skb, struct net_device *dev,
 #endif
 {
 	struct rcv_dev_list *q;
+	struct hlist_node *n;
 	int matches;
 
 	DBG("received skbuff on device %s, ptype %04x\n",
@@ -549,7 +559,8 @@ static int can_rcv(struct sk_buff *skb, struct net_device *dev,
 	matches = can_rcv_filter(&rx_alldev_list, skb);
 
 	/* find receive list for this device */
-	for (q = rx_dev_list; q; q = q->next)
+	q = NULL;
+	hlist_for_each_entry(q, n, &rx_dev_list, list)
 		if (q->dev == dev)
 			break;
 
@@ -583,6 +594,7 @@ static inline void deliver(struct sk_buff *skb, struct rcv_list *p)
 static int can_rcv_filter(struct rcv_dev_list *q, struct sk_buff *skb)
 {
 	struct rcv_list *p;
+	struct hlist_node *n;
 	int matches = 0;
 	struct can_frame *cf = (struct can_frame*)skb->data;
 	canid_t can_id = cf->can_id;
@@ -592,7 +604,7 @@ static int can_rcv_filter(struct rcv_dev_list *q, struct sk_buff *skb)
 
 	if (can_id & CAN_ERR_FLAG) {
 		/* check for error frame entries only */
-		for (p = q->rx_err; p; p = p->next) {
+		hlist_for_each_entry(p, n, &q->rx_err, list) {
 			if (can_id & p->mask) {
 				DBG("match on rx_err skbuff %p\n", skb);
 				deliver(skb, p);
@@ -603,14 +615,14 @@ static int can_rcv_filter(struct rcv_dev_list *q, struct sk_buff *skb)
 	}
 
 	/* check for unfiltered entries */
-	for (p = q->rx_all; p; p = p->next) {
+	hlist_for_each_entry(p, n, &q->rx_all, list) {
 		DBG("match on rx_all skbuff %p\n", skb);
 		deliver(skb, p);
 		matches++;
 	}
 
 	/* check for can_id/mask entries */
-	for (p = q->rx_fil; p; p = p->next) {
+	hlist_for_each_entry(p, n, &q->rx_fil, list) {
 		if ((can_id & p->mask) == p->can_id) {
 			DBG("match on rx_fil skbuff %p\n", skb);
 			deliver(skb, p);
@@ -619,7 +631,7 @@ static int can_rcv_filter(struct rcv_dev_list *q, struct sk_buff *skb)
 	}
 
 	/* check for inverted can_id/mask entries */
-	for (p = q->rx_inv; p; p = p->next) {
+	hlist_for_each_entry(p, n, &q->rx_inv, list) {
 		if ((can_id & p->mask) != p->can_id) {
 			DBG("match on rx_inv skbuff %p\n", skb);
 			deliver(skb, p);
@@ -629,7 +641,7 @@ static int can_rcv_filter(struct rcv_dev_list *q, struct sk_buff *skb)
 
 	/* check CAN_ID specific entries */
 	if (can_id & CAN_EFF_FLAG) {
-		for (p = q->rx_eff; p; p = p->next) {
+		hlist_for_each_entry(p, n, &q->rx_eff, list) {
 			if (p->can_id == can_id) {
 				DBG("match on rx_eff skbuff %p\n", skb);
 				deliver(skb, p);
@@ -637,7 +649,8 @@ static int can_rcv_filter(struct rcv_dev_list *q, struct sk_buff *skb)
 			}
 		}
 	} else {
-		for (p = q->rx_sff[can_id & CAN_SFF_MASK]; p; p = p->next) {
+		can_id &= CAN_SFF_MASK;
+		hlist_for_each_entry(p, n, &q->rx_sff[can_id], list) {
 			DBG("match on rx_sff skbuff %p\n", skb);
 			deliver(skb, p);
 			matches++;
@@ -648,8 +661,8 @@ static int can_rcv_filter(struct rcv_dev_list *q, struct sk_buff *skb)
 	return matches;
 }
 
-static struct rcv_list **find_rcv_list(canid_t *can_id, canid_t *mask,
-				       struct net_device *dev)
+static struct hlist_head *find_rcv_list(canid_t *can_id, canid_t *mask,
+					struct net_device *dev)
 {
 	canid_t inv = *can_id & CAN_INV_FILTER; /* save flag before masking values */
 	canid_t eff = *can_id & *mask & CAN_EFF_FLAG; /* correct EFF check? */
@@ -657,6 +670,7 @@ static struct rcv_list **find_rcv_list(canid_t *can_id, canid_t *mask,
 	canid_t err = *mask & CAN_ERR_FLAG; /* mask for error frames only */
 
 	struct rcv_dev_list *p;
+	struct hlist_node *n;
 
 	/* make some paranoic operations */
 	if (*can_id & CAN_EFF_FLAG)
@@ -673,7 +687,7 @@ static struct rcv_list **find_rcv_list(canid_t *can_id, canid_t *mask,
 		/* find the list for dev or an unused list entry, otherwise */
 		struct rcv_dev_list *q;
 		p = NULL;
-		for (q = rx_dev_list; q; q = q->next)
+		hlist_for_each_entry(q, n, &rx_dev_list, list)
 			if (!q->dev)
 				p = q;
 			else if (q->dev == dev) {
@@ -694,10 +708,14 @@ static struct rcv_list **find_rcv_list(canid_t *can_id, canid_t *mask,
 			printk(KERN_ERR "CAN: allocation of receive list failed\n");
 			return NULL;
 		}
+		/* N.B. zeroing the struct is the correct initialization
+		        for the embedded hlist_head structs.
+			Another list type, e.g. list_head, would require
+			explicit initialization. */
 		memset (p, 0, sizeof(struct rcv_dev_list));
-		p->dev      = dev;
-		p->next     = rx_dev_list;
-		rx_dev_list = p;
+
+		p->dev = dev;
+		hlist_add_head(&p->list, &rx_dev_list);
 	}
 
 	if (err) /* error frames */
