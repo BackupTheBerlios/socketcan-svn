@@ -112,6 +112,7 @@ struct notifier_list {
 };
 
 static LIST_HEAD(nlist);
+static rwlock_t notifier_lock = RW_LOCK_UNLOCKED;
 
 HLIST_HEAD(rx_dev_list);
 struct rcv_dev_list rx_alldev_list;
@@ -237,7 +238,9 @@ void can_dev_register(struct net_device *dev,
 	p->func = func;
 	p->data = data;
 
+	write_lock(&notifier_lock);
 	list_add(&p->list, &nlist);
+	write_unlock(&notifier_lock);
 }
 
 void can_dev_unregister(struct net_device *dev,
@@ -247,13 +250,15 @@ void can_dev_unregister(struct net_device *dev,
 
 	DBG("called for %s\n", dev->name);
 
+	write_lock(&notifier_lock);
 	list_for_each_entry (p, &nlist, list) {
 		if (p->dev == dev && p->func == func && p->data == data) {
 			list_del(&p->list);
 			kfree(p);
-			return;
+			break;
 		}
 	}
+	write_unlock(&notifier_lock);
 }
 
 /**************************************************/
@@ -369,10 +374,13 @@ static int can_notifier(struct notifier_block *nb,
 
 	DBG("called for %s, msg = %lu\n", dev->name, msg);
 
+	read_lock(&notifier_lock);
 	list_for_each_entry (p, &nlist, list) {
 		if (p->dev == dev)
 			p->func(msg, p->data);
 	}
+	read_unlock(&notifier_lock);
+
 	return 0;
 }
 
