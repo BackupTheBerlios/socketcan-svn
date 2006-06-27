@@ -105,13 +105,13 @@ static struct hlist_head *find_rcv_list(canid_t *can_id, canid_t *mask,
 					struct net_device *dev);
 
 struct notifier_list {
-	struct notifier_list *next;
+	struct list_head list;
 	struct net_device *dev;
 	void (*func)(unsigned long msg, void *data);
 	void *data;
 };
 
-static struct notifier_list *nlist;
+static LIST_HEAD(nlist);
 
 HLIST_HEAD(rx_dev_list);
 struct rcv_dev_list rx_alldev_list;
@@ -232,23 +232,24 @@ void can_dev_register(struct net_device *dev,
 
 	if (!p)
 		return;
-	p->next = nlist;
+
 	p->dev  = dev;
 	p->func = func;
 	p->data = data;
-	nlist = p;
+
+	list_add(&p->list, &nlist);
 }
 
 void can_dev_unregister(struct net_device *dev,
 			void (*func)(unsigned long msg, void *), void *data)
 {
-	struct notifier_list *p, **q;
+	struct notifier_list *p;
 
 	DBG("called for %s\n", dev->name);
 
-	for (q = &nlist; p = *q; q = &p->next) {
+	list_for_each_entry (p, &nlist, list) {
 		if (p->dev == dev && p->func == func && p->data == data) {
-			*q = p->next;
+			list_del(&p->list);
 			kfree(p);
 			return;
 		}
@@ -368,7 +369,7 @@ static int can_notifier(struct notifier_block *nb,
 
 	DBG("called for %s, msg = %lu\n", dev->name, msg);
 
-	for (p = nlist; p; p = p->next) {
+	list_for_each_entry (p, &nlist, list) {
 		if (p->dev == dev)
 			p->func(msg, p->data);
 	}
