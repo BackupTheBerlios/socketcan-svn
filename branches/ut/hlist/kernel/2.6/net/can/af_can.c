@@ -46,7 +46,9 @@
 #include <linux/version.h>
 #include <linux/kmod.h>
 #include <linux/init.h>
+#include <linux/list.h>
 #include <linux/spinlock.h>
+#include <linux/rcupdate.h>
 #include <linux/socket.h>
 #include <linux/skbuff.h>
 #include <linux/net.h>
@@ -116,8 +118,7 @@ static rwlock_t notifier_lock = RW_LOCK_UNLOCKED;
 
 HLIST_HEAD(rx_dev_list);
 struct rcv_dev_list rx_alldev_list;
-static rwlock_t rcv_lists_lock  = RW_LOCK_UNLOCKED;
-rwlock_t rcv_lock = RW_LOCK_UNLOCKED;
+static spinlock_t rcv_lists_lock  = SPIN_LOCK_UNLOCKED;
 
 static struct packet_type can_packet = {
 	.type = __constant_htons(ETH_P_CAN),
@@ -443,7 +444,7 @@ void can_rx_register(struct net_device *dev, canid_t can_id, canid_t mask,
 	DBG("dev %p, id %03X, mask %03X, callback %p, data %p, ident %s\n",
 	    dev, can_id, mask, func, data, ident);
 
-	write_lock(&rcv_lists_lock);
+	spin_lock(&rcv_lists_lock);
 
 	q = find_rcv_list(&can_id, &mask, dev);
 
@@ -465,7 +466,7 @@ void can_rx_register(struct net_device *dev, canid_t can_id, canid_t mask,
 	p->data    = data;
 	p->ident   = ident;
 
-	hlist_add_head(&p->list, q);
+	hlist_add_head_rcu(&p->list, q);
 
 	if (!dev)
 		d = &rx_alldev_list;
@@ -482,7 +483,7 @@ void can_rx_register(struct net_device *dev, canid_t can_id, canid_t mask,
 		pstats.rcv_entries_max = pstats.rcv_entries;
 
  out:
-	write_unlock(&rcv_lists_lock);
+	spin_unlock(&rcv_lists_lock);
 }
 
 void can_rx_unregister(struct net_device *dev, canid_t can_id, canid_t mask,
@@ -496,7 +497,9 @@ void can_rx_unregister(struct net_device *dev, canid_t can_id, canid_t mask,
 	DBG("dev %p, id %03X, mask %03X, callback %p, data %p\n",
 	    dev, can_id, mask, func, data);
 
-	write_lock(&rcv_lists_lock);
+	p = NULL;
+
+	spin_lock(&rcv_lists_lock);
 
 	q = find_rcv_list(&can_id, &mask, dev);
 
@@ -506,7 +509,6 @@ void can_rx_unregister(struct net_device *dev, canid_t can_id, canid_t mask,
 		goto out;
 	}
 
-	p = NULL;
 	hlist_for_each_entry(p, n, q, list) {
 		if (p->can_id == can_id && p->mask == mask
 		    && p->func == func && p->data == data)
@@ -519,10 +521,7 @@ void can_rx_unregister(struct net_device *dev, canid_t can_id, canid_t mask,
 		goto out;
 	}
 
-	write_lock_bh(&rcv_lock);
-	hlist_del(&p->list);
-	kfree(p);
-	write_unlock_bh(&rcv_lock);
+	hlist_del_rcu(&p->list);
 
 	if (pstats.rcv_entries > 0)
 		pstats.rcv_entries--;
@@ -541,7 +540,12 @@ void can_rx_unregister(struct net_device *dev, canid_t can_id, canid_t mask,
 		d->dev = NULL; /* mark unused */
 
  out:
-	write_unlock(&rcv_lists_lock);
+	spin_unlock(&rcv_lists_lock);
+
+	if (p) {
+		synchronize_rcu();
+		kfree(p);
+	}
 }
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,14)
@@ -566,20 +570,20 @@ static int can_rcv(struct sk_buff *skb, struct net_device *dev,
 	stats.rx_frames++;
 	stats.rx_frames_delta++;
 
-	read_lock(&rcv_lock);
+	rcu_read_lock();
 
 	matches = can_rcv_filter(&rx_alldev_list, skb);
 
 	/* find receive list for this device */
 	q = NULL;
-	hlist_for_each_entry(q, n, &rx_dev_list, list)
+	hlist_for_each_entry_rcu(q, n, &rx_dev_list, list)
 		if (q->dev == dev)
 			break;
 
 	if (q)
 		matches += can_rcv_filter(q, skb);
 
-	read_unlock(&rcv_lock);
+	rcu_read_unlock();
 
 	DBG("freeing skbuff %p\n", skb);
 	kfree_skb(skb);
@@ -616,7 +620,7 @@ static int can_rcv_filter(struct rcv_dev_list *q, struct sk_buff *skb)
 
 	if (can_id & CAN_ERR_FLAG) {
 		/* check for error frame entries only */
-		hlist_for_each_entry(p, n, &q->rx_err, list) {
+		hlist_for_each_entry_rcu(p, n, &q->rx_err, list) {
 			if (can_id & p->mask) {
 				DBG("match on rx_err skbuff %p\n", skb);
 				deliver(skb, p);
@@ -627,14 +631,14 @@ static int can_rcv_filter(struct rcv_dev_list *q, struct sk_buff *skb)
 	}
 
 	/* check for unfiltered entries */
-	hlist_for_each_entry(p, n, &q->rx_all, list) {
+	hlist_for_each_entry_rcu(p, n, &q->rx_all, list) {
 		DBG("match on rx_all skbuff %p\n", skb);
 		deliver(skb, p);
 		matches++;
 	}
 
 	/* check for can_id/mask entries */
-	hlist_for_each_entry(p, n, &q->rx_fil, list) {
+	hlist_for_each_entry_rcu(p, n, &q->rx_fil, list) {
 		if ((can_id & p->mask) == p->can_id) {
 			DBG("match on rx_fil skbuff %p\n", skb);
 			deliver(skb, p);
@@ -643,7 +647,7 @@ static int can_rcv_filter(struct rcv_dev_list *q, struct sk_buff *skb)
 	}
 
 	/* check for inverted can_id/mask entries */
-	hlist_for_each_entry(p, n, &q->rx_inv, list) {
+	hlist_for_each_entry_rcu(p, n, &q->rx_inv, list) {
 		if ((can_id & p->mask) != p->can_id) {
 			DBG("match on rx_inv skbuff %p\n", skb);
 			deliver(skb, p);
@@ -653,7 +657,7 @@ static int can_rcv_filter(struct rcv_dev_list *q, struct sk_buff *skb)
 
 	/* check CAN_ID specific entries */
 	if (can_id & CAN_EFF_FLAG) {
-		hlist_for_each_entry(p, n, &q->rx_eff, list) {
+		hlist_for_each_entry_rcu(p, n, &q->rx_eff, list) {
 			if (p->can_id == can_id) {
 				DBG("match on rx_eff skbuff %p\n", skb);
 				deliver(skb, p);
@@ -662,7 +666,7 @@ static int can_rcv_filter(struct rcv_dev_list *q, struct sk_buff *skb)
 		}
 	} else {
 		can_id &= CAN_SFF_MASK;
-		hlist_for_each_entry(p, n, &q->rx_sff[can_id], list) {
+		hlist_for_each_entry_rcu(p, n, &q->rx_sff[can_id], list) {
 			DBG("match on rx_sff skbuff %p\n", skb);
 			deliver(skb, p);
 			matches++;
@@ -867,4 +871,3 @@ EXPORT_SYMBOL(can_dev_register);
 EXPORT_SYMBOL(can_dev_unregister);
 EXPORT_SYMBOL(can_send);
 EXPORT_SYMBOL(timeval2jiffies);
-EXPORT_SYMBOL(rcv_lock);

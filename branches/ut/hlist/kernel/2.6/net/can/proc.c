@@ -45,7 +45,7 @@
 #include <linux/module.h>
 #include <linux/proc_fs.h>
 #include <linux/list.h>
-#include <linux/spinlock.h>
+#include <linux/rcupdate.h>
 
 #include <linux/can/af_can.h>
 
@@ -111,7 +111,6 @@ struct s_pstats pstats;
 
 extern struct hlist_head rx_dev_list;    /* rx dispatcher structures */
 extern int stats_timer;                  /* module parameter. default: on */
-extern rwlock_t rcv_lock;
 
 /**************************************************/
 /* procfs init / remove                           */
@@ -206,8 +205,8 @@ static int can_print_recv_list(char *page, int len, struct hlist_head *rx_list,
 	struct rcv_list *p;
 	struct hlist_node *n;
 
-	read_lock(&rcv_lock);
-	hlist_for_each_entry(p, n, rx_list, list) {
+	rcu_read_lock();
+	hlist_for_each_entry_rcu(p, n, rx_list, list) {
 		char *fmt = p->can_id & CAN_EFF_FLAG ? /* EFF & CAN_ID_ALL */
 			"   %-5s  %08X  %08x  %08x  %08x  %8ld  %s\n" :
 			"   %-5s     %03X    %08x  %08x  %08x  %8ld  %s\n";
@@ -226,7 +225,7 @@ static int can_print_recv_list(char *page, int len, struct hlist_head *rx_list,
 			break;
 		}
 	}
-	read_unlock(&rcv_lock);
+	rcu_read_unlock();
 
 	return len;
 }
@@ -353,8 +352,8 @@ static int can_proc_read_rcvlist_all(char *page, char **start, off_t off,
 			"\nreceive list 'rx_all':\n");
 
 	/* find receive list for this device */
-	read_lock(&rcv_lock);
-	hlist_for_each_entry (p, n, &rx_dev_list, list) {
+	rcu_read_lock();
+	hlist_for_each_entry_rcu(p, n, &rx_dev_list, list) {
 
 		if (!hlist_empty(&p->rx_all)) {
 			len = can_print_recv_banner(page, len);
@@ -363,7 +362,7 @@ static int can_proc_read_rcvlist_all(char *page, char **start, off_t off,
 			len += snprintf(page + len, PAGE_SIZE - len,
 					"  (%s: no entry)\n", p->dev->name);
 	}
-	read_unlock(&rcv_lock);
+	rcu_read_unlock();
 
 	len += snprintf(page + len, PAGE_SIZE - len, "\n");
 
@@ -383,8 +382,8 @@ static int can_proc_read_rcvlist_fil(char *page, char **start, off_t off,
 			"\nreceive list 'rx_fil':\n");
 
 	/* find receive list for this device */
-	read_lock(&rcv_lock);
-	hlist_for_each_entry (p, n, &rx_dev_list, list) {
+	rcu_read_lock();
+	hlist_for_each_entry_rcu(p, n, &rx_dev_list, list) {
 
 		if (!hlist_empty(&p->rx_fil)) {
 			len = can_print_recv_banner(page, len);
@@ -393,7 +392,7 @@ static int can_proc_read_rcvlist_fil(char *page, char **start, off_t off,
 			len += snprintf(page + len, PAGE_SIZE - len,
 					"  (%s: no entry)\n", p->dev->name);
 	}
-	read_unlock(&rcv_lock);
+	rcu_read_unlock();
 
 	len += snprintf(page + len, PAGE_SIZE - len, "\n");
 
@@ -413,8 +412,8 @@ static int can_proc_read_rcvlist_inv(char *page, char **start, off_t off,
 			"\nreceive list 'rx_inv':\n");
 
 	/* find receive list for this device */
-	read_lock(&rcv_lock);
-	hlist_for_each_entry (p, n, &rx_dev_list, list) {
+	rcu_read_lock();
+	hlist_for_each_entry_rcu(p, n, &rx_dev_list, list) {
 
 		if (!hlist_empty(&p->rx_inv)) {
 			len = can_print_recv_banner(page, len);
@@ -423,7 +422,7 @@ static int can_proc_read_rcvlist_inv(char *page, char **start, off_t off,
 			len += snprintf(page + len, PAGE_SIZE - len,
 					"  (%s: no entry)\n", p->dev->name);
 	}
-	read_unlock(&rcv_lock);
+	rcu_read_unlock();
 
 	len += snprintf(page + len, PAGE_SIZE - len, "\n");
 
@@ -443,8 +442,8 @@ static int can_proc_read_rcvlist_sff(char *page, char **start, off_t off,
 			"\nreceive list 'rx_sff':\n");
 
 	/* find receive list for this device */
-	read_lock(&rcv_lock);
-	hlist_for_each_entry (p, n, &rx_dev_list, list) {
+	rcu_read_lock();
+	hlist_for_each_entry_rcu(p, n, &rx_dev_list, list) {
 		int i, all_empty = 1;
 		/* check wether at least one list is non-empty */
 		for (i = 0; i < 0x800; i++)
@@ -463,7 +462,7 @@ static int can_proc_read_rcvlist_sff(char *page, char **start, off_t off,
 			len += snprintf(page + len, PAGE_SIZE - len,
 					"  (%s: no entry)\n", p->dev->name);
 	}
-	read_unlock(&rcv_lock);
+	rcu_read_unlock();
 
 	len += snprintf(page + len, PAGE_SIZE - len, "\n");
 
@@ -483,8 +482,8 @@ static int can_proc_read_rcvlist_eff(char *page, char **start, off_t off,
 			"\nreceive list 'rx_eff':\n");
 
 	/* find receive list for this device */
-	read_lock(&rcv_lock);
-	hlist_for_each_entry (p, n, &rx_dev_list, list) {
+	rcu_read_lock();
+	hlist_for_each_entry_rcu(p, n, &rx_dev_list, list) {
 
 		if (!hlist_empty(&p->rx_eff)) {
 			len = can_print_recv_banner(page, len);
@@ -493,7 +492,7 @@ static int can_proc_read_rcvlist_eff(char *page, char **start, off_t off,
 			len += snprintf(page + len, PAGE_SIZE - len,
 					"  (%s: no entry)\n", p->dev->name);
 	}
-	read_unlock(&rcv_lock);
+	rcu_read_unlock();
 
 	len += snprintf(page + len, PAGE_SIZE - len, "\n");
 
@@ -513,8 +512,8 @@ static int can_proc_read_rcvlist_err(char *page, char **start, off_t off,
 			"\nreceive list 'rx_err':\n");
 
 	/* find receive list for this device */
-	read_lock(&rcv_lock);
-	hlist_for_each_entry (p, n, &rx_dev_list, list) {
+	rcu_read_lock();
+	hlist_for_each_entry_rcu(p, n, &rx_dev_list, list) {
 
 		if (!hlist_empty(&p->rx_err)) {
 			len = can_print_recv_banner(page, len);
@@ -523,7 +522,7 @@ static int can_proc_read_rcvlist_err(char *page, char **start, off_t off,
 			len += snprintf(page + len, PAGE_SIZE - len,
 					"  (%s: no entry)\n", p->dev->name);
 	}
-	read_unlock(&rcv_lock);
+	rcu_read_unlock();
 
 	len += snprintf(page + len, PAGE_SIZE - len, "\n");
 
