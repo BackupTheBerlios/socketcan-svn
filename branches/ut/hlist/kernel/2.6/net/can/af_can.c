@@ -574,13 +574,23 @@ static int can_rcv(struct sk_buff *skb, struct net_device *dev,
 
 	matches = can_rcv_filter(&rx_alldev_list, skb);
 
-	/* find receive list for this device */
-	q = NULL;
+	/*  find receive list for this device
+	 *
+	 *  The hlist_for_each_entry*() macros curse through the list
+	 *  using the pointer variable n and set q to the containing
+	 *  struct in each list iteration.  Therefore, after list
+	 *  iteration, q is unmodified when the list is empty, and it
+	 *  points to last list element, when the list is non-empty
+	 *  but no match in the loop body is found.  I.e. q is *not*
+	 *  NULL when no match is found.  We can, however, use the
+	 *  cursor variable n to decide if a match was found.
+	 */
+
 	hlist_for_each_entry_rcu(q, n, &rx_dev_list, list)
 		if (q->dev == dev)
 			break;
 
-	if (q)
+	if (n)
 		matches += can_rcv_filter(q, skb);
 
 	rcu_read_unlock();
