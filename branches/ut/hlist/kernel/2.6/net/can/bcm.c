@@ -38,10 +38,11 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH
  * DAMAGE.
  *
- * Send feedback to <llcf@volkswagen.de>
+ * Send feedback to <socketcan-users@lists.berlios.de>
  *
  */
 
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/net.h>
@@ -52,17 +53,17 @@
 
 #include <linux/can/af_can.h>
 #include <linux/can/bcm.h>
+#include <linux/can/version.h>
 
-#include "version.h"
 
 RCSID("$Id$");
 
-#ifdef DEBUG
+#ifdef CONFIG_CAN_DEBUG_CORE
 static int debug = 0;
 module_param(debug, int, S_IRUGO);
 #define DBG(args...)       (debug & 1 ? \
-	                       (printk(KERN_DEBUG "BCM %s: ", __func__), \
-			        printk(args)) : 0)
+			       (printk(KERN_DEBUG "BCM %s: ", __func__), \
+				printk(args)) : 0)
 #define DBG_FRAME(args...) (debug & 2 ? can_debug_cframe(args) : 0)
 #define DBG_SKB(skb)       (debug & 4 ? can_debug_skb(skb) : 0)
 #else
@@ -75,6 +76,7 @@ module_param(debug, int, S_IRUGO);
 #define RX_RECV    0x40 /* received data for this element */
 #define RX_THR     0x80 /* this element has not been sent due to throttle functionality */
 #define BCM_CAN_DLC_MASK 0x0F /* clean flags by masking with BCM_CAN_DLC_MASK */
+#define BCM_RX_REGMASK (CAN_EFF_MASK | CAN_EFF_FLAG | CAN_RTR_FLAG)
 
 #define NAME "Broadcast Manager (BCM) for LLCF"
 #define IDENT "bcm"
@@ -203,7 +205,7 @@ static int __init bcm_init(void)
 
 	can_proto_register(CAN_BCM, &bcm_can_proto);
 
-	/* create /proc/can/bcm directory */
+	/* create /proc/net/can/bcm directory */
 	proc_dir = proc_mkdir(CAN_PROC_DIR"/"IDENT, NULL);
 
 	if (proc_dir)
@@ -262,7 +264,7 @@ static int bcm_release(struct socket *sock)
 			if (sk->sk_bound_dev_if) {
 				struct net_device *dev = dev_get_by_index(sk->sk_bound_dev_if);
 				if (dev) {
-					can_rx_unregister(dev, op->can_id, 0xFFFFFFFFU, bcm_rx_handler, op);
+					can_rx_unregister(dev, op->can_id, BCM_RX_REGMASK, bcm_rx_handler, op);
 					dev_put(dev);
 				}
 			} else
@@ -658,9 +660,9 @@ static int bcm_sendmsg(struct kiocb *iocb, struct socket *sock,
 	{
 		struct sk_buff *skb;
 		struct net_device *dev;
-	    
+
 		/* just copy and send one can_frame */
-	    
+
 		if (msg_head.nframes < 1) /* we need at least one can_frame */
 			return -EINVAL;
 
@@ -677,7 +679,8 @@ static int bcm_sendmsg(struct kiocb *iocb, struct socket *sock,
 
 		if (dev) {
 			skb->dev = dev;
-			can_send(skb);
+			skb->sk  = sk;
+			can_send(skb, 1); /* send with loopback */
 			dev_put(dev);
 		}
 
@@ -888,7 +891,7 @@ static int bcm_sendmsg(struct kiocb *iocb, struct socket *sock,
 			DBG("RX_SETUP: can_rx_register() for can_id <%03X>. rx_op is (%p)\n", op->can_id, op);
 
 			if (dev) {
-				can_rx_register(dev, op->can_id, 0xFFFFFFFFU, bcm_rx_handler, op, IDENT);
+				can_rx_register(dev, op->can_id, BCM_RX_REGMASK, bcm_rx_handler, op, IDENT);
 				dev_put(dev);
 			}
 		}
@@ -1278,7 +1281,8 @@ static void bcm_can_tx(struct bcm_op *op)
 
 		if (dev) {
 			skb->dev = dev;
-			can_send(skb);
+			skb->sk = op->sk;
+			can_send(skb, 1); /* send with loopback */
 			dev_put(dev);
 		}
 	}
@@ -1351,7 +1355,7 @@ static void bcm_delete_rx_op(struct list_head *ops, canid_t can_id)
 			if (p->sk->sk_bound_dev_if) {
 				struct net_device *dev = dev_get_by_index(p->sk->sk_bound_dev_if);
 				if (dev) {
-					can_rx_unregister(dev, p->can_id, 0xFFFFFFFFU, bcm_rx_handler, p);
+					can_rx_unregister(dev, p->can_id, BCM_RX_REGMASK, bcm_rx_handler, p);
 					dev_put(dev);
 				}
 			} else

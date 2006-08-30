@@ -38,10 +38,11 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH
  * DAMAGE.
  *
- * Send feedback to <llcf@volkswagen.de>
+ * Send feedback to <socketcan-users@lists.berlios.de>
  *
  */
 
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/version.h>
 #include <linux/init.h>
@@ -54,11 +55,10 @@
 #include <linux/can/af_can.h>
 #include <linux/can/can_error.h>
 #include <linux/can/raw.h>
+#include <linux/can/version.h>
 
-#include "version.h"
 
 RCSID("$Id$");
-
 
 #define NAME "RAW sockets for LLCF"
 #define IDENT "raw"
@@ -68,18 +68,19 @@ MODULE_DESCRIPTION(NAME);
 MODULE_LICENSE("Dual BSD/GPL");
 MODULE_AUTHOR("Urs Thuermann <urs.thuermann@volkswagen.de>");
 
-#ifdef DEBUG
+#ifdef CONFIG_CAN_DEBUG_CORE
 static int debug = 0;
 module_param(debug, int, S_IRUGO);
 #define DBG(args...)       (debug & 1 ? \
-	                       (printk(KERN_DEBUG "RAW %s: ", __func__), \
-			        printk(args)) : 0)
+			       (printk(KERN_DEBUG "RAW %s: ", __func__), \
+				printk(args)) : 0)
 #define DBG_SKB(skb)       (debug & 4 ? can_debug_skb(skb) : 0)
 #else
 #define DBG(args...)
 #define DBG_SKB(skb)
 #endif
 
+static int raw_init(struct sock *sk);
 static int raw_release(struct socket *sock);
 static int raw_bind   (struct socket *sock, struct sockaddr *uaddr, int len);
 static int raw_getname(struct socket *sock, struct sockaddr *uaddr,
@@ -126,6 +127,8 @@ struct raw_opt {
 	int bound;
 	int ifindex;
 	int count;
+	int loopback;
+	int recv_own_msgs;
 	struct can_filter *filter;
 	can_err_mask_t err_mask;
 };
@@ -143,6 +146,7 @@ static struct proto raw_proto = {
 	.name     = "CAN_RAW",
 	.owner    = THIS_MODULE,
 	.obj_size = sizeof(struct raw_sock),
+	.init     = raw_init,
 };
 
 static struct can_proto raw_can_proto = {
@@ -158,13 +162,14 @@ static struct can_proto raw_can_proto = {
 	.ops      = &raw_ops,
 	.owner    = THIS_MODULE,
 	.obj_size = sizeof(struct raw_opt),
+	.init     = raw_init,
 };
 
 #endif
 
 #define MASK_ALL 0
 
-static __init int raw_init(void)
+static __init int raw_module_init(void)
 {
 	printk(banner);
 
@@ -172,9 +177,17 @@ static __init int raw_init(void)
 	return 0;
 }
 
-static __exit void raw_exit(void)
+static __exit void raw_module_exit(void)
 {
 	can_proto_unregister(CAN_RAW);
+}
+
+static int raw_init(struct sock *sk)
+{
+	canraw_sk(sk)->loopback      = 1;
+	canraw_sk(sk)->recv_own_msgs = 0;
+
+	return 0;
 }
 
 static int raw_release(struct socket *sock)
@@ -284,7 +297,7 @@ static int raw_getname(struct socket *sock, struct sockaddr *uaddr,
 
 	if (peer)
 		return -EOPNOTSUPP;
-	
+
 	addr->can_family  = AF_CAN;
 	addr->can_ifindex = canraw_sk(sk)->ifindex;
 	*len = sizeof(*addr);
@@ -323,7 +336,7 @@ static int raw_setsockopt(struct socket *sock, int level, int optname,
 				return -EINVAL;
 			if (!(filter = kmalloc(optlen, GFP_KERNEL)))
 				return -ENOMEM;
-			if (err = copy_from_user(filter, optval, optlen)) {
+			if ((err = copy_from_user(filter, optval, optlen))) {
 				kfree(filter);
 				return err;
 			}
@@ -338,7 +351,7 @@ static int raw_setsockopt(struct socket *sock, int level, int optname,
 
 			if (canraw_sk(sk)->bound)
 				raw_remove_filters(dev, sk);
-	    
+
 			kfree(canraw_sk(sk)->filter);
 			canraw_sk(sk)->count = 0;
 			canraw_sk(sk)->filter = NULL;
@@ -363,7 +376,7 @@ static int raw_setsockopt(struct socket *sock, int level, int optname,
 		if (optlen) {
 			if (optlen != sizeof(err_mask))
 				return -EINVAL;
-			if (err = copy_from_user(&err_mask, optval, optlen)) {
+			if ((err = copy_from_user(&err_mask, optval, optlen))) {
 				return err;
 			}
 		}
@@ -387,6 +400,26 @@ static int raw_setsockopt(struct socket *sock, int level, int optname,
 		if (dev)
 			dev_put(dev);
 
+		break;
+
+	case CAN_RAW_LOOPBACK:
+		if (optlen) {
+			if (optlen != sizeof(canraw_sk(sk)->loopback))
+				return -EINVAL;
+			if ((err = copy_from_user(&canraw_sk(sk)->loopback, optval, optlen))) {
+				return err;
+			}
+		}
+		break;
+
+	case CAN_RAW_RECV_OWN_MSGS:
+		if (optlen) {
+			if (optlen != sizeof(canraw_sk(sk)->recv_own_msgs))
+				return -EINVAL;
+			if ((err = copy_from_user(&canraw_sk(sk)->recv_own_msgs, optval, optlen))) {
+				return err;
+			}
+		}
 		break;
 
 	default:
@@ -420,8 +453,10 @@ static int raw_getsockopt(struct socket *sock, int level, int optname,
 				return -EFAULT;
 		} else
 			len = 0;
+
 		if (put_user(len, optlen))
 			return -EFAULT;
+
 		break;
 
 	case CAN_RAW_ERR_FILTER:
@@ -439,6 +474,43 @@ static int raw_getsockopt(struct socket *sock, int level, int optname,
 
 		if (put_user(len, optlen))
 			return -EFAULT;
+
+		break;
+
+	case CAN_RAW_LOOPBACK:
+		if (get_user(len, optlen))
+			return -EFAULT;
+
+		if (len < sizeof(int))
+			return -EINVAL;
+
+		if (len > sizeof(int))
+			len = sizeof(int);
+
+		if (copy_to_user(optval, &canraw_sk(sk)->loopback, len))
+			return -EFAULT;
+
+		if (put_user(len, optlen))
+			return -EFAULT;
+
+		break;
+
+	case CAN_RAW_RECV_OWN_MSGS:
+		if (get_user(len, optlen))
+			return -EFAULT;
+
+		if (len < sizeof(int))
+			return -EINVAL;
+
+		if (len > sizeof(int))
+			len = sizeof(int);
+
+		if (copy_to_user(optval, &canraw_sk(sk)->recv_own_msgs, len))
+			return -EFAULT;
+
+		if (put_user(len, optlen))
+			return -EFAULT;
+
 		break;
 
 	default:
@@ -506,11 +578,12 @@ static int raw_sendmsg(struct kiocb *iocb, struct socket *sock,
 		return err;
 	}
 	skb->dev = dev;
+	skb->sk  = sk;
 
 	DBG("sending skbuff to interface %d\n", ifindex);
 	DBG_SKB(skb);
 
-	err = can_send(skb);
+	err = can_send(skb, canraw_sk(sk)->loopback);
 
 	dev_put(dev);
 
@@ -570,6 +643,14 @@ static void raw_rcv(struct sk_buff *skb, void *data)
 	DBG("received skbuff %p, sk %p\n", skb, sk);
 	DBG_SKB(skb);
 
+	if (!canraw_sk(sk)->recv_own_msgs) {
+		if (*(struct sock **)skb->cb == sk) { /* tx sock reference */
+			DBG("trashed own tx msg\n");
+			kfree_skb(skb);
+			return;
+		}
+	}
+
 	addr = (struct sockaddr_can *)skb->cb;
 	memset(addr, 0, sizeof(*addr));
 	addr->can_family  = AF_CAN;
@@ -600,5 +681,5 @@ static void raw_notifier(unsigned long msg, void *data)
 }
 
 
-module_init(raw_init);
-module_exit(raw_exit);
+module_init(raw_module_init);
+module_exit(raw_module_exit);

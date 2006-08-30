@@ -38,10 +38,11 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH
  * DAMAGE.
  *
- * Send feedback to <llcf@volkswagen.de>
+ * Send feedback to <socketcan-users@lists.berlios.de>
  *
  */
 
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/version.h>
 #include <linux/kmod.h>
@@ -57,8 +58,8 @@
 #include <asm/uaccess.h>
 
 #include <linux/can/af_can.h>
+#include <linux/can/version.h>
 
-#include "version.h"
 
 RCSID("$Id$");
 
@@ -74,12 +75,12 @@ MODULE_AUTHOR("Urs Thuermann <urs.thuermann@volkswagen.de>, "
 int stats_timer = 1; /* default: on */
 module_param(stats_timer, int, S_IRUGO);
 
-#ifdef DEBUG
+#ifdef CONFIG_CAN_DEBUG_CORE
 static int debug = 0;
 module_param(debug, int, S_IRUGO);
 #define DBG(args...)       (debug & 1 ? \
-	                       (printk(KERN_DEBUG "CAN %s: ", __func__), \
-			        printk(args)) : 0)
+			       (printk(KERN_DEBUG "CAN %s: ", __func__), \
+				printk(args)) : 0)
 #define DBG_FRAME(args...) (debug & 2 ? can_debug_cframe(args) : 0)
 #define DBG_SKB(skb)       (debug & 4 ? can_debug_skb(skb) : 0)
 #else
@@ -280,6 +281,7 @@ static int can_create(struct socket *sock, int protocol)
 {
 	struct sock *sk;
 	struct can_proto *cp;
+	int ret;
 
 	DBG("socket %p, type %d, proto %d\n", sock, sock->type, protocol);
 
@@ -303,6 +305,10 @@ static int can_create(struct socket *sock, int protocol)
 	case SOCK_DGRAM:
 		switch (protocol) {
 		case CAN_BCM:
+#ifndef CONFIG_CAN_BCM_USER
+			if (!capable(CAP_NET_RAW))
+				return -EPERM;
+#endif
 			break;
 		case CAN_BAP:
 			break;
@@ -313,8 +319,10 @@ static int can_create(struct socket *sock, int protocol)
 	case SOCK_RAW:
 		switch (protocol) {
 		case CAN_RAW:
+#ifndef CONFIG_CAN_RAW_USER
 			if (!capable(CAP_NET_RAW))
 				return -EPERM;
+#endif
 			break;
 		default:
 			return -EPROTONOSUPPORT;
@@ -362,6 +370,21 @@ static int can_create(struct socket *sock, int protocol)
 
 	DBG("created sock: %p\n", sk);
 
+	ret = 0;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,13)
+	if (sk->sk_prot->init)
+		ret = sk->sk_prot->init(sk);
+#else
+	if (cp->init)
+		ret = cp->init(sk);
+#endif
+	if (ret) {
+		/* we must release sk */
+		sock_orphan(sk);
+		sock_put(sk);
+		return ret;
+	}
+
 	return 0;
 
  oom:
@@ -407,10 +430,17 @@ static int can_ioctl(struct socket *sock, unsigned int cmd, unsigned long arg)
 /* af_can tx path                                 */
 /**************************************************/
 
-int can_send(struct sk_buff *skb)
+int can_send(struct sk_buff *skb, int loop)
 {
-	struct sk_buff *newskb = skb_clone(skb, GFP_ATOMIC);
 	int err;
+
+	if (loop) { /* local loopback (default) */
+		struct sk_buff *newskb = skb_clone(skb, GFP_ATOMIC);
+		newskb->protocol  = htons(ETH_P_CAN);
+		newskb->ip_summed = CHECKSUM_UNNECESSARY;
+		*(struct sock **)newskb->cb = skb->sk; /* tx sock reference */
+		netif_rx(newskb); /* => local loopback */
+	}
 
 	if (!(skb->dev->flags & IFF_UP))
 		err = -ENETDOWN;
@@ -420,10 +450,6 @@ int can_send(struct sk_buff *skb)
 	/* update statistics */
 	stats.tx_frames++;
 	stats.tx_frames_delta++;
-
-	newskb->protocol  = htons(ETH_P_CAN);
-	newskb->ip_summed = CHECKSUM_UNNECESSARY;
-	netif_rx(newskb);                          /* local loopback */
 
 	return err;
 }
@@ -616,7 +642,7 @@ static inline void deliver(struct sk_buff *skb, struct rcv_list *p)
 		p->matches++;    /* update specific statistics */
 	}
 }
-    
+
 static int can_rcv_filter(struct rcv_dev_list *q, struct sk_buff *skb)
 {
 	struct rcv_list *p;
@@ -722,7 +748,7 @@ static struct hlist_head *find_rcv_list(canid_t *can_id, canid_t *mask,
 			}
 
 		if (p && !p->dev) {
-			DBG("reactivating rcv_dev_list for %s\n", dev->name); 
+			DBG("reactivating rcv_dev_list for %s\n", dev->name);
 			p->dev = dev;
 		}
 	}
@@ -796,7 +822,7 @@ unsigned long timeval2jiffies(struct timeval *tv, int round_up)
 /* af_can debugging stuff                         */
 /**************************************************/
 
-#ifdef DEBUG
+#ifdef CONFIG_CAN_DEBUG_CORE
 
 void can_debug_cframe(const char *msg, struct can_frame *cf, ...)
 {
@@ -804,7 +830,7 @@ void can_debug_cframe(const char *msg, struct can_frame *cf, ...)
 	int len;
 	int dlc, i;
 	char buf[1024];
-    
+
 	len = sprintf(buf, KERN_DEBUG);
 	va_start(ap, cf);
 	len += snprintf(buf + len, sizeof(buf) - 64, msg, ap);

@@ -38,7 +38,7 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH
  * DAMAGE.
  *
- * Send feedback to <llcf@volkswagen.de>
+ * Send feedback to <socketcan-users@lists.berlios.de>
  *
  */
 
@@ -48,8 +48,8 @@
 #include <linux/rcupdate.h>
 
 #include <linux/can/af_can.h>
+#include <linux/can/version.h>
 
-#include "version.h"
 
 RCSID("$Id$");
 
