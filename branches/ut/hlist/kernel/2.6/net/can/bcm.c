@@ -1346,9 +1346,9 @@ static struct bcm_op *bcm_find_op(struct list_head *ops, canid_t can_id)
 
 static void bcm_delete_rx_op(struct list_head *ops, canid_t can_id)
 {
-	struct bcm_op *p;
+	struct bcm_op *p, *n;
 
-	list_for_each_entry(p, ops, list) {
+	list_for_each_entry_safe(p, n, ops, list) {
 		if (p->can_id == can_id) {
 			DBG("removing rx_op (%p) for can_id <%03X>\n", p, p->can_id);
 
@@ -1361,6 +1361,7 @@ static void bcm_delete_rx_op(struct list_head *ops, canid_t can_id)
 			} else
 				DBG("sock %p not bound for can_rx_unregister()\n", p->sk);
 
+			list_del(&p->list);
 			bcm_remove_op(p);
 			return;
 		}
@@ -1369,12 +1370,13 @@ static void bcm_delete_rx_op(struct list_head *ops, canid_t can_id)
 
 static void bcm_delete_tx_op(struct list_head *ops, canid_t can_id)
 {
-	struct bcm_op *p;
+	struct bcm_op *p, *n;
 
-	list_for_each_entry(p, ops, list) {
+	list_for_each_entry_safe(p, n, ops, list) {
 		if (p->can_id == can_id) {
 			DBG("removing rx_op (%p) for can_id <%03X>\n",
 			    p, p->can_id);
+			list_del(&p->list);
 			bcm_remove_op(p);
 			return;
 		}
