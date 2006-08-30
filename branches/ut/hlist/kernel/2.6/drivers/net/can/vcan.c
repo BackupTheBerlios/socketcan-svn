@@ -38,17 +38,18 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH
  * DAMAGE.
  *
- * Send feedback to <llcf@volkswagen.de>
+ * Send feedback to <socketcan-users@lists.berlios.de>
  *
  */
 
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/netdevice.h>
 #include <linux/if_arp.h>
 
-#include <net/can/af_can.h>
-#include <net/can/version.h>
+#include <linux/can/af_can.h>
+#include <linux/can/version.h>
 
 RCSID("$Id$");
 
@@ -60,12 +61,12 @@ MODULE_DESCRIPTION(NAME);
 MODULE_LICENSE("Dual BSD/GPL");
 MODULE_AUTHOR("Urs Thuermann <urs.thuermann@volkswagen.de>");
 
-#ifdef DEBUG
+#ifdef CONFIG_CAN_DEBUG_DEVICES
 static int debug = 0;
 module_param(debug, int, S_IRUGO);
 #define DBG(args...)       (debug & 1 ? \
-	                       (printk(KERN_DEBUG "VCAN %s: ", __func__), \
-			        printk(args)) : 0)
+			       (printk(KERN_DEBUG "VCAN %s: ", __func__), \
+				printk(args)) : 0)
 #define DBG_FRAME(args...) (debug & 2 ? can_debug_cframe(args) : 0)
 #define DBG_SKB(skb)       (debug & 4 ? can_debug_skb(skb) : 0)
 #else
@@ -216,7 +217,7 @@ static __init int vcan_init_module(void)
 		if (!(vcan_devs[i] = alloc_netdev(sizeof(struct net_device_stats),
 						  "vcan%d", vcan_init)))
 			printk(KERN_ERR "vcan: error allocating net_device\n");
-		else if (result = register_netdev(vcan_devs[i])) {
+		else if ((result = register_netdev(vcan_devs[i])) < 0) {
 			printk(KERN_ERR "vcan: error %d registering interface %s\n",
 			       result, vcan_devs[i]->name);
 			free_netdev(vcan_devs[i]);

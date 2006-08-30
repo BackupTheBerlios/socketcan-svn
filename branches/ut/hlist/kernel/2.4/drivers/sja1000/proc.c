@@ -40,7 +40,7 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH
  * DAMAGE.
  *
- * Send feedback to <llcf@volkswagen.de>
+ * Send feedback to <socketcan-users@lists.berlios.de>
  *
  */
 
@@ -84,7 +84,7 @@ static int sja1000_proc_read(char *page, char **start, off_t off, int count, int
 					priv->can_stats.wakeup,
 					priv->can_stats.bus_error,
 					priv->can_stats.error_passive,
-				       	priv->can_stats.arbitration_lost,
+					priv->can_stats.arbitration_lost,
 					priv->can_stats.restarts,
 					priv->clock,
 					priv->speed
@@ -183,8 +183,8 @@ static int sja1000_proc_read_reset(char *page, char **start, off_t off, int coun
 			priv = netdev_priv(can_dev[i]);
 			if ((priv->state != STATE_UNINITIALIZED) && (priv->state != STATE_RESET_MODE)) {
 				len += snprintf(page + len, PAGE_SIZE - len, "%s ", dev->name);
-                                dev->stop(dev);
-                                dev->open(dev);
+				dev->stop(dev);
+				dev->open(dev);
 				/* count number of restarts */
 				priv->can_stats.restarts++;
 

@@ -1,10 +1,7 @@
 /*
  * $Id$
  *
- * trajet-gw2.c - Philips SJA1000 network device driver for TRAJET.GW2
- *
- * Copyright (c) 2003 Matthias Brukner, Trajet Gmbh, Rebenring 33,
- * 38106 Braunschweig, GERMANY
+ * mem.c - Philips SJA1000 network device driver for IOMEM
  *
  * Copyright (c) 2002-2005 Volkswagen Group Electronic Research
  * All rights reserved.
@@ -64,43 +61,34 @@
 #include <linux/skbuff.h>
 #include <asm/io.h>
 
-#include "can.h"
-#include "can_ioctl.h" /* for struct can_device_stats */
+#include <linux/can/can.h>
+#include <linux/can/can_ioctl.h> /* for struct can_device_stats */
 #include "sja1000.h"
 
 #define MAX_CAN		8
 #define CAN_DEV_NAME	"can%d"
-#define DRV_NAME        "sja1000-gw2"
+#define DRV_NAME        "sja1000-mem"
 
 #define DEFAULT_KBIT_PER_SEC 500
-#define SJA1000_HW_CLOCK 20000000
-#define ADDR_GAP	1
-#define RSIZE		(SJA1000_IO_SIZE_PELICAN * (ADDR_GAP + 1))
+#define SJA1000_HW_CLOCK 16000000
 
 /* driver and version information */
 static const char *drv_name	= DRV_NAME;
-static const char *drv_version	= "0.0.11";
-static const char *drv_reldate	= "2005-10-11";
+static const char *drv_version	= "0.0.1";
+static const char *drv_reldate	= "2006-08-22";
 static const char *chip_name	= SJA1000_CHIP_NAME;
 
-MODULE_AUTHOR("Matthias Brukner <M.Brukner@trajet.de>");
+MODULE_AUTHOR("Oliver Hartkopp <oliver.hartkopp@volkswagen.de>, Pavel Pisa <pisa@cmp.felk.cvut.cz>");
 MODULE_LICENSE("Dual BSD/GPL");
 MODULE_DESCRIPTION("LLCF SJA1000 network device driver '" DRV_NAME "'");
 
 /* module parameters */
-static uint32_t base_addr[MAX_CAN] = {
-	(uint32_t)0xf0100200L,
-	(uint32_t)0xf0100300L,
-	(uint32_t)0xf0100400L,
-	(uint32_t)0xf0100500L,
-	0
-};
-static int irq[MAX_CAN] = { 26, 26, 26, 26, 0 };
-static int speed[MAX_CAN] = {
-	DEFAULT_KBIT_PER_SEC, DEFAULT_KBIT_PER_SEC,
-	DEFAULT_KBIT_PER_SEC, DEFAULT_KBIT_PER_SEC,
-	0
-};
+static uint32_t base_addr[MAX_CAN] = { (uint32_t)0xda000L, 0};
+
+static int irq[MAX_CAN] = { 9, 0 };
+
+static int speed[MAX_CAN] = { DEFAULT_KBIT_PER_SEC, DEFAULT_KBIT_PER_SEC, 0};
+
 static int btr[MAX_CAN] = { 0 };
 static int rx_probe[MAX_CAN] = { 0 };
 
@@ -111,13 +99,29 @@ static int restart_ms = 100;
 /* array of all can chips */
 static struct net_device	*can_dev[MAX_CAN];
 
+static int base_addr_n;
+static int irq_n;
+static int speed_n;
+static int btr_n;
+static int rx_probe_n;
+
+module_param_array(base_addr, int, &base_addr_n, 0);
+module_param_array(irq, int, &irq_n, 0);
+module_param_array(speed, int, &speed_n, 0);
+module_param_array(btr, int, &btr_n, 0);
+module_param_array(rx_probe, int, &rx_probe_n, 0);
+
+module_param(clk, int, 0);
+module_param(debug, int, 0);
+module_param(restart_ms, int, 0);
 
 /* special functions to access the chips registers */
 static uint8_t reg_read(struct net_device *dev, int reg)
 {
 	static uint8_t val;
+	void __iomem *addr = (void __iomem *)dev->base_addr + reg;
 
-	val = (uint8_t)readw(dev->base_addr + reg * (ADDR_GAP + 1) + ADDR_GAP);
+	val = (uint8_t)readw(addr);
 	rmb();
 
 	return val;
@@ -125,43 +129,31 @@ static uint8_t reg_read(struct net_device *dev, int reg)
 
 static void reg_write(struct net_device *dev, int reg, uint8_t val)
 {
-	writew(val, dev->base_addr + reg * 2 + 1);
+	void __iomem *addr = (void __iomem *)dev->base_addr + reg;
+
+	writew(val, addr);
 	wmb();
 }
 
-MODULE_PARM(base_addr, "1-" __MODULE_STRING(MAX_CAN)"i");
-MODULE_PARM(irq,       "1-" __MODULE_STRING(MAX_CAN)"i");
-MODULE_PARM(speed,     "1-" __MODULE_STRING(MAX_CAN)"i");
-MODULE_PARM(btr,       "1-" __MODULE_STRING(MAX_CAN)"i");
-MODULE_PARM(rx_probe,  "1-" __MODULE_STRING(MAX_CAN)"i");
-MODULE_PARM(clk, "i");
-MODULE_PARM(debug, "i");
-MODULE_PARM(restart_ms, "i");
-
-static struct net_device* sja1000_gw2_probe(uint32_t base, int irq, int speed,
+static struct net_device* sja1000_mem_probe(uint32_t base, int irq, int speed,
 					    int btr, int rx_probe, int clk,
 					    int debug, int restart_ms)
 {
 	struct net_device	*dev;
 	struct can_priv		*priv;
 
-	if (!(dev = kmalloc(sizeof(struct net_device), GFP_KERNEL))) {
+	if (!(dev = alloc_netdev(sizeof(struct can_priv), CAN_DEV_NAME,
+				 sja1000_setup))) {
 		printk(KERN_ERR "%s: out of memory\n", chip_name);
 		return NULL;
 	}
-	memset(dev, 0, sizeof(struct net_device));
-
-	if (!(priv = kmalloc(sizeof(struct can_priv), GFP_KERNEL))) {
-		printk(KERN_ERR "%s: out of memory\n", chip_name);
-		goto free_dev;
-	}
-	memset(priv, 0, sizeof(struct can_priv));
-	dev->priv = priv;
 
 	printk(KERN_INFO "%s: base 0x%X / irq %d / speed %d / btr 0x%X / rx_probe %d\n",
 	       chip_name, base, irq, speed, btr, rx_probe);
 
 	/* fill net_device structure */
+
+	priv             = netdev_priv(dev);
 
 	dev->irq         = irq;
 	dev->base_addr   = base;
@@ -176,23 +168,32 @@ static struct net_device* sja1000_gw2_probe(uint32_t base, int irq, int speed,
 	priv->restart_ms = restart_ms;
 	priv->debug      = debug;
 
-	init_timer(&priv->timer);
-	priv->timer.expires = 0;
+	if (REG_READ(0) == 0xFF)
+		goto free_dev;
 
-	dev->init = sja1000_probe;
-	strcpy(dev->name, CAN_DEV_NAME);
+	/* set chip into reset mode */
+	set_reset_mode(dev);
+
+	/* go into Pelican mode, disable clkout, disable comparator */
+	REG_WRITE(REG_CDR, 0xCF);
+
+	/* output control */
+	/* connected to external transceiver */
+	REG_WRITE(REG_OCR, 0x1A);
+
+	printk(KERN_INFO "%s: %s found at 0x%X, irq is %d\n",
+	       dev->name, chip_name, (uint32_t)dev->base_addr, dev->irq);
 
 	if (register_netdev(dev) == 0)
 		return dev;
 
 	printk(KERN_INFO "%s: probing failed\n", chip_name);
-	kfree(dev->priv);
  free_dev:
-	kfree(dev);
+	free_netdev(dev);
 	return NULL;
 }
 
-static __exit void sja1000_gw2_cleanup_module(void)
+static __exit void sja1000_mem_cleanup_module(void)
 {
 	int i;
 
@@ -201,21 +202,17 @@ static __exit void sja1000_gw2_cleanup_module(void)
 			struct can_priv *priv = netdev_priv(can_dev[i]);
 			unregister_netdev(can_dev[i]);
 			del_timer(&priv->timer);
-			iounmap((void*)can_dev[i]->base_addr);
-			release_mem_region(base_addr[i], RSIZE);
-			kfree(priv);
-			kfree(can_dev[i]);
-			can_dev[i] = NULL;
+			iounmap((void __iomem *)can_dev[i]->base_addr);
+			release_mem_region(base_addr[i], SJA1000_IO_SIZE_BASIC);
+			free_netdev(can_dev[i]);
 		}
 	}
 	sja1000_proc_delete(drv_name);
 }
 
-static __init int sja1000_gw2_init_module(void)
+static __init int sja1000_mem_init_module(void)
 {
 	int i;
-	struct net_device *dev;
-	void *base;
 
 	if (clk < 1000 ) /* MHz command line value */
 		clk *= 1000000;
@@ -229,29 +226,32 @@ static __init int sja1000_gw2_init_module(void)
 	       chip_name, clk/1000000, clk%1000000, restart_ms, debug);
 
 	for (i = 0; base_addr[i]; i++) {
+
+		struct net_device *dev = NULL;
+		void *base;
+
 		printk(KERN_DEBUG "%s: checking for %s on address 0x%X ...\n",
 		       chip_name, chip_name, base_addr[i]);
-		if (check_mem_region(base_addr[i], RSIZE)) {
+		if (!request_mem_region(base_addr[i], SJA1000_IO_SIZE_BASIC, chip_name)) {
 			printk(KERN_ERR "%s: memory already in use\n", chip_name);
-			sja1000_gw2_cleanup_module();
+			sja1000_mem_cleanup_module();
 			return -EBUSY;
 		}
-		request_mem_region(base_addr[i], RSIZE, chip_name);
-		base = ioremap(base_addr[i], RSIZE);
-		dev = sja1000_gw2_probe((uint32_t)base, irq[i], speed[i], btr[i], rx_probe[i], clk, debug, restart_ms);
+
+		base = ioremap(base_addr[i], SJA1000_IO_SIZE_BASIC);
+		if (base)
+			dev = sja1000_mem_probe((uint32_t)base, irq[i], speed[i], btr[i], rx_probe[i], clk, debug, restart_ms);
 		if (dev != NULL) {
 			can_dev[i] = dev;
 			sja1000_proc_init(drv_name, can_dev, MAX_CAN);
 		} else {
 			can_dev[i] = NULL;
 			iounmap(base);
-			release_mem_region(base_addr[i], RSIZE);
+			release_mem_region(base_addr[i], SJA1000_IO_SIZE_BASIC);
 		}
 	}
 	return 0;
 }
 
-module_init(sja1000_gw2_init_module);
-module_exit(sja1000_gw2_cleanup_module);
-
-EXPORT_NO_SYMBOLS;
+module_init(sja1000_mem_init_module);
+module_exit(sja1000_mem_cleanup_module);

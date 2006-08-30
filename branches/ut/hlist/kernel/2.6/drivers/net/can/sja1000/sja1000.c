@@ -43,12 +43,12 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH
  * DAMAGE.
  *
- * Send feedback to <llcf@volkswagen.de>
+ * Send feedback to <socketcan-users@lists.berlios.de>
  *
  */
 
+#include <linux/config.h>
 #include <linux/module.h>
-
 #include <linux/ioport.h>
 #include <linux/slab.h>
 #include <linux/netdevice.h>
@@ -59,9 +59,7 @@
 #include <linux/can/can_ioctl.h>
 #include "sja1000.h"
 
-#define DEBUG
-
-#ifdef DEBUG
+#ifdef CONFIG_CAN_DEBUG_DEVICES
 #define DBG(args...)   ((priv->debug > 0) ? printk(args) : 0)
 #define iDBG(args...)  ((priv->debug > 1) ? printk(args) : 0)  /* logging in interrupt context */
 #define iiDBG(args...) ((priv->debug > 2) ? printk(args) : 0)  /* logging in interrupt context */
@@ -71,9 +69,7 @@
 #define iiDBG(args...)
 #endif
 
-
-static const char *chip_name	= SJA1000_CHIP_NAME;
-
+#ifdef CONFIG_CAN_DEBUG_DEVICES
 static const char *ecc_errors[] = {
 	NULL,
 	NULL,
@@ -115,6 +111,7 @@ static const char *ecc_types[] = {
 	"stuff error",
 	"other type of error"
 };
+#endif
 
 /* declarations */
 
@@ -130,7 +127,7 @@ static void chipset_init_trx(struct net_device *dev);
 static void set_btr(struct net_device *dev, int btr0, int btr1)
 {
 	struct can_priv *priv = netdev_priv(dev);
-	
+
 	if (priv->state == STATE_UNINITIALIZED) /* no bla bla when restarting the device */
 		printk(KERN_INFO "%s: setting BTR0=%02X BTR1=%02X\n",
 		       dev->name, btr0, btr1);
@@ -234,20 +231,22 @@ int set_reset_mode(struct net_device *dev)
 	return 1;
 
 }
-	
+
 static int set_normal_mode(struct net_device *dev)
 {
-	struct can_priv *priv = netdev_priv(dev);
 	unsigned char status = REG_READ(REG_MOD);
 	int i;
 
 	for (i = 0; i < 10; i++) {
 		/* check reset bit */
 		if ((status & MOD_RM) == 0) {
+#ifdef CONFIG_CAN_DEBUG_DEVICES
 			if (i > 1) {
+				struct can_priv *priv = netdev_priv(dev);
 				iDBG(KERN_INFO "%s: %s looped %d times\n",
 				     dev->name, __FUNCTION__, i);
 			}
+#endif
 			return 0;
 		}
 
@@ -262,17 +261,19 @@ static int set_normal_mode(struct net_device *dev)
 
 static int set_listen_mode(struct net_device *dev)
 {
-	struct can_priv *priv = netdev_priv(dev);
 	unsigned char status = REG_READ(REG_MOD);
 	int i;
 
 	for (i = 0; i < 10; i++) {
 		/* check reset mode bit */
 		if ((status & MOD_RM) == 0) {
+#ifdef CONFIG_CAN_DEBUG_DEVICES
 			if (i > 1) {
+				struct can_priv *priv = netdev_priv(dev);
 				iDBG(KERN_INFO "%s: %s looped %d times\n",
 				     dev->name, __FUNCTION__, i);
 			}
+#endif
 			return 0;
 		}
 
@@ -490,7 +491,7 @@ static void can_restart_dev(unsigned long data)
 
 		/* count number of restarts */
 		priv->can_stats.restarts++;
-	
+
 		chipset_init(dev, 1);
 	}
 }
@@ -506,7 +507,7 @@ static void can_restart_now(struct net_device *dev)
 
 		/* count number of restarts */
 		priv->can_stats.restarts++;
-	
+
 		chipset_init(dev, 1);
 	}
 }
@@ -584,10 +585,10 @@ static int can_ioctl(struct net_device *dev, struct ifreq *rq, int cmd)
 		return -EINVAL;
 
 	switch (cmd) {
-	case SIOCSRATE:
+	case SIOCSCANBAUDRATE:
 		;
 		return 0;
-	case SIOCGRATE:
+	case SIOCGCANBAUDRATE:
 		;
 		return 0;
 	}
@@ -603,7 +604,7 @@ static irqreturn_t can_interrupt(int irq, void *dev_id, struct pt_regs *regs)
 	struct can_priv *priv = netdev_priv(dev);
 	uint8_t isrc, status, ecc, alc;
 	int n = 0;
-	
+
 	if (priv->state == STATE_UNINITIALIZED) {
 		printk(KERN_ERR "%s: %s: uninitialized controller!\n", dev->name, __FUNCTION__);
 		chipset_init(dev, 1); /* this should be possible at this stage */
@@ -677,7 +678,7 @@ static irqreturn_t can_interrupt(int irq, void *dev_id, struct pt_regs *regs)
 			     (ecc & ECC_DIR) ? "RX" : "TX",
 			     ecc_types[ecc >> ECC_ERR],
 			     ecc_errors[ecc & ECC_SEG]);
-			
+
 			/* when the bus errors flood the system, restart the controller */
 			if (priv->can_stats.bus_error_at_init + MAX_BUS_ERRORS < priv->can_stats.bus_error) {
 				iDBG(KERN_INFO "%s: heavy bus errors, restarting device\n", dev->name);

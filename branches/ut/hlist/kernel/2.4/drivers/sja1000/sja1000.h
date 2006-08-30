@@ -43,7 +43,7 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH
  * DAMAGE.
  *
- * Send feedback to <llcf@volkswagen.de>
+ * Send feedback to <socketcan-users@lists.berlios.de>
  *
  */
 
@@ -57,8 +57,8 @@
 
 #define DEFAULT_SPEED	100 /* kBit/s */
 
-#define TX_TIMEOUT	(HZ/20) /* 50ms */ 
-#define RESTART_MS      100 	/* restart chip on persistent errors in 100ms */
+#define TX_TIMEOUT	(HZ/20) /* 50ms */
+#define RESTART_MS      100     /* restart chip on persistent errors in 100ms */
 #define MAX_BUS_ERRORS  200     /* prevent from flooding bus error interrupts */
 
 /* SJA1000 registers - manual section 6.4 (Pelican Mode) */
@@ -175,7 +175,7 @@ struct can_priv {
 	int			speed;
 	int			btr;
 	int			rx_probe;
-        struct timer_list       timer;
+	struct timer_list       timer;
 	uint8_t			(*reg_read)(struct net_device *dev, int reg);
 	void			(*reg_write)(struct net_device *dev, int reg, uint8_t val);
 	struct can_device_stats	can_stats;

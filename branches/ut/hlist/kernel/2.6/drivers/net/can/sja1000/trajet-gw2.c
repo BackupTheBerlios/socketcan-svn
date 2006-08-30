@@ -43,7 +43,7 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH
  * DAMAGE.
  *
- * Send feedback to <llcf@volkswagen.de>
+ * Send feedback to <socketcan-users@lists.berlios.de>
  *
  */
 
@@ -79,8 +79,8 @@
 
 /* driver and version information */
 static const char *drv_name	= DRV_NAME;
-static const char *drv_version	= "0.0.11";
-static const char *drv_reldate	= "2005-10-11";
+static const char *drv_version	= "0.0.12";
+static const char *drv_reldate	= "2005-08-22";
 static const char *chip_name	= SJA1000_CHIP_NAME;
 
 MODULE_AUTHOR("Matthias Brukner <M.Brukner@trajet.de>");
@@ -111,13 +111,29 @@ static int restart_ms = 100;
 /* array of all can chips */
 static struct net_device	*can_dev[MAX_CAN];
 
+static int base_addr_n;
+static int irq_n;
+static int speed_n;
+static int btr_n;
+static int rx_probe_n;
+
+module_param_array(base_addr, int, &base_addr_n, 0);
+module_param_array(irq, int, &irq_n, 0);
+module_param_array(speed, int, &speed_n, 0);
+module_param_array(btr, int, &btr_n, 0);
+module_param_array(rx_probe, int, &rx_probe_n, 0);
+
+module_param(clk, int, 0);
+module_param(debug, int, 0);
+module_param(restart_ms, int, 0);
 
 /* special functions to access the chips registers */
 static uint8_t reg_read(struct net_device *dev, int reg)
 {
 	static uint8_t val;
+	void __iomem *addr = (void __iomem *)dev->base_addr + reg * (ADDR_GAP + 1) + ADDR_GAP;
 
-	val = (uint8_t)readw(dev->base_addr + reg * (ADDR_GAP + 1) + ADDR_GAP);
+	val = (uint8_t)readw(addr);
 	rmb();
 
 	return val;
@@ -125,18 +141,11 @@ static uint8_t reg_read(struct net_device *dev, int reg)
 
 static void reg_write(struct net_device *dev, int reg, uint8_t val)
 {
-	writew(val, dev->base_addr + reg * 2 + 1);
+	void __iomem *addr = (void __iomem *)dev->base_addr + reg * (ADDR_GAP + 1) + ADDR_GAP;
+
+	writew(val, addr);
 	wmb();
 }
-
-MODULE_PARM(base_addr, "1-" __MODULE_STRING(MAX_CAN)"i");
-MODULE_PARM(irq,       "1-" __MODULE_STRING(MAX_CAN)"i");
-MODULE_PARM(speed,     "1-" __MODULE_STRING(MAX_CAN)"i");
-MODULE_PARM(btr,       "1-" __MODULE_STRING(MAX_CAN)"i");
-MODULE_PARM(rx_probe,  "1-" __MODULE_STRING(MAX_CAN)"i");
-MODULE_PARM(clk, "i");
-MODULE_PARM(debug, "i");
-MODULE_PARM(restart_ms, "i");
 
 static struct net_device* sja1000_gw2_probe(uint32_t base, int irq, int speed,
 					    int btr, int rx_probe, int clk,
@@ -205,7 +214,7 @@ static __exit void sja1000_gw2_cleanup_module(void)
 			struct can_priv *priv = netdev_priv(can_dev[i]);
 			unregister_netdev(can_dev[i]);
 			del_timer(&priv->timer);
-			iounmap((void*)can_dev[i]->base_addr);
+			iounmap((void __iomem *)can_dev[i]->base_addr);
 			release_mem_region(base_addr[i], RSIZE);
 			free_netdev(can_dev[i]);
 		}
@@ -216,8 +225,6 @@ static __exit void sja1000_gw2_cleanup_module(void)
 static __init int sja1000_gw2_init_module(void)
 {
 	int i;
-	struct net_device *dev;
-	void *base;
 
 	if (clk < 1000 ) /* MHz command line value */
 		clk *= 1000000;
@@ -231,6 +238,10 @@ static __init int sja1000_gw2_init_module(void)
 	       chip_name, clk/1000000, clk%1000000, restart_ms, debug);
 
 	for (i = 0; base_addr[i]; i++) {
+
+		struct net_device *dev = NULL;
+		void *base;
+
 		printk(KERN_DEBUG "%s: checking for %s on address 0x%X ...\n",
 		       chip_name, chip_name, base_addr[i]);
 		if (!request_mem_region(base_addr[i], RSIZE, chip_name)) {
@@ -238,8 +249,11 @@ static __init int sja1000_gw2_init_module(void)
 			sja1000_gw2_cleanup_module();
 			return -EBUSY;
 		}
+
 		base = ioremap(base_addr[i], RSIZE);
-		dev = sja1000_gw2_probe((uint32_t)base, irq[i], speed[i], btr[i], rx_probe[i], clk, debug, restart_ms);
+		if (base)
+			dev = sja1000_gw2_probe((uint32_t)base, irq[i], speed[i], btr[i], rx_probe[i], clk, debug, restart_ms);
+
 		if (dev != NULL) {
 			can_dev[i] = dev;
 			sja1000_proc_init(drv_name, can_dev, MAX_CAN);

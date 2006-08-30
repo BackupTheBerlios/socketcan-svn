@@ -38,7 +38,7 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH
  * DAMAGE.
  *
- * Send feedback to <llcf@volkswagen.de>
+ * Send feedback to <socketcan-users@lists.berlios.de>
  *
  */
 
@@ -67,6 +67,9 @@
 
 #define SIOCGCANSTATE		(SIOCDEVPRIVATE+10)
 #define SIOCGCANSTATS		(SIOCDEVPRIVATE+11)
+
+#define SIOCSCANERRORCONFIG	(SIOCDEVPRIVATE+12)
+#define SIOCGCANERRORCONFIG	(SIOCDEVPRIVATE+13)
 
 /* parameters for ioctls */
 
@@ -108,7 +111,8 @@ struct can_bittime {
 		struct can_bittime_btr btr;
 	};
 };
-#define CAN_BAUDRATE_UNCONFIGURED	((__u32)-1)
+
+#define CAN_BAUDRATE_UNCONFIGURED	((__u32) 0xFFFFFFFFU)
 #define CAN_BAUDRATE_UNKNOWN		0
 
 /* SIOC[SG]CANMODE */
@@ -136,7 +140,7 @@ typedef __u32 can_filter_t;
 #define CAN_FILTER_CAPAB       0  /* get filter type capabilities (32 Bit value) */
 #define CAN_FILTER_MASK_VALUE  1  /* easy bit filter (see struct can_filter) */
 #define CAN_FILTER_SFF_BITMASK 2  /* bitfield with 2048 bit SFF filter */
-                                  /* filters 3 - 31 currently undefined */
+				  /* filters 3 - 31 currently undefined */
 
 #define CAN_FILTER_MAX         31 /* max. filter type value */
 
@@ -166,5 +170,15 @@ struct can_device_stats {
 	int restarts;
 	int bus_error_at_init;
 };
+
+/* SIOC[SG]CANERRORCONFIG */
+
+typedef enum CAN_ERRCFG_TYPE {
+	CAN_ERRCFG_MASK,
+	CAN_ERRCFG_BUSERR,
+	CAN_ERRCFG_BUSOFF
+} can_errcfg_type_t;
+
+/* tbd */
 
 #endif /* CAN_IOCTL_H */

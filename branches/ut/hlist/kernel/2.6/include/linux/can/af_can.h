@@ -38,7 +38,7 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH
  * DAMAGE.
  *
- * Send feedback to <llcf@volkswagen.de>
+ * Send feedback to <socketcan-users@lists.berlios.de>
  *
  */
 
@@ -96,7 +96,7 @@ struct can_filter {
 
 #ifdef __KERNEL__
 
-#define CAN_PROC_DIR "sys/net/can" /* /proc/... */
+#define CAN_PROC_DIR "net/can" /* /proc/... */
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,13)
 struct can_proto {
@@ -107,6 +107,7 @@ struct can_proto {
 struct can_proto {
 	struct proto_ops *ops;
 	struct module    *owner;
+	int              (*init)(struct sock *sk);
 	size_t           obj_size;
 };
 #endif
@@ -122,7 +123,7 @@ void can_dev_register(struct net_device *dev,
 		      void (*func)(unsigned long msg, void *), void *data);
 void can_dev_unregister(struct net_device *dev,
 			void (*func)(unsigned long msg, void *), void *data);
-int  can_send(struct sk_buff *skb);
+int  can_send(struct sk_buff *skb, int loop);
 
 unsigned long timeval2jiffies(struct timeval *tv, int round_up);
 

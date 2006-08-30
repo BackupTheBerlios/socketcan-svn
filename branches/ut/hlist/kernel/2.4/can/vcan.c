@@ -38,7 +38,7 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH
  * DAMAGE.
  *
- * Send feedback to <llcf@volkswagen.de>
+ * Send feedback to <socketcan-users@lists.berlios.de>
  *
  */
 
@@ -64,8 +64,8 @@ MODULE_AUTHOR("Urs Thuermann <urs.thuermann@volkswagen.de>");
 MODULE_PARM(debug, "1i");
 static int debug = 0;
 #define DBG(args...)       (debug & 1 ? \
-	                       (printk(KERN_DEBUG "VCAN %s: ", __func__), \
-			        printk(args)) : 0)
+			       (printk(KERN_DEBUG "VCAN %s: ", __func__), \
+				printk(args)) : 0)
 #define DBG_FRAME(args...) (debug & 2 ? can_debug_cframe(args) : 0)
 #define DBG_SKB(skb)       (debug & 4 ? can_debug_skb(skb) : 0)
 #else
