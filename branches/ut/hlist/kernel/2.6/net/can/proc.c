@@ -202,7 +202,7 @@ void can_remove_proc(void)
 static int can_print_recv_list(char *page, int len, struct hlist_head *rx_list,
 			       struct net_device *dev)
 {
-	struct rcv_list *p;
+	struct rcv_entry *p;
 	struct hlist_node *n;
 
 	rcu_read_lock();
@@ -344,7 +344,7 @@ static int can_proc_read_rcvlist_all(char *page, char **start, off_t off,
 				     int count, int *eof, void *data)
 {
 	int len = 0;
-	struct rcv_dev_list *p;
+	struct rcv_dev_entry *p;
 	struct hlist_node *n;
 
 	/* RX_ALL */
@@ -374,7 +374,7 @@ static int can_proc_read_rcvlist_fil(char *page, char **start, off_t off,
 				     int count, int *eof, void *data)
 {
 	int len = 0;
-	struct rcv_dev_list *p;
+	struct rcv_dev_entry *p;
 	struct hlist_node *n;
 
 	/* RX_FIL */
@@ -404,7 +404,7 @@ static int can_proc_read_rcvlist_inv(char *page, char **start, off_t off,
 				     int count, int *eof, void *data)
 {
 	int len = 0;
-	struct rcv_dev_list *p;
+	struct rcv_dev_entry *p;
 	struct hlist_node *n;
 
 	/* RX_INV */
@@ -434,7 +434,7 @@ static int can_proc_read_rcvlist_sff(char *page, char **start, off_t off,
 				     int count, int *eof, void *data)
 {
 	int len = 0;
-	struct rcv_dev_list *p;
+	struct rcv_dev_entry *p;
 	struct hlist_node *n;
 
 	/* RX_SFF */
@@ -474,7 +474,7 @@ static int can_proc_read_rcvlist_eff(char *page, char **start, off_t off,
 				     int count, int *eof, void *data)
 {
 	int len = 0;
-	struct rcv_dev_list *p;
+	struct rcv_dev_entry *p;
 	struct hlist_node *n;
 
 	/* RX_EFF */
@@ -504,7 +504,7 @@ static int can_proc_read_rcvlist_err(char *page, char **start, off_t off,
 				     int count, int *eof, void *data)
 {
 	int len = 0;
-	struct rcv_dev_list *p;
+	struct rcv_dev_entry *p;
 	struct hlist_node *n;
 
 	/* RX_ERR */

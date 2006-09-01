@@ -132,7 +132,7 @@ void can_debug_cframe(const char *msg, struct can_frame *cframe, ...);
 
 /* af_can rx dispatcher structures */
 
-struct rcv_list {
+struct rcv_entry {
 	struct hlist_node list;
 	canid_t can_id;
 	canid_t mask;
@@ -142,7 +142,7 @@ struct rcv_list {
 	char *ident;
 };
 
-struct rcv_dev_list {
+struct rcv_dev_entry {
 	struct hlist_node list;
 	struct net_device *dev;
 	struct hlist_head rx_err;
