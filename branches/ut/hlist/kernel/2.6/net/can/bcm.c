@@ -375,6 +375,12 @@ int bcm_read_proc(char *page, char **start, off_t off, int count, int *eof, void
 
 		unsigned long reduction;
 
+		if (len >= PAGE_SIZE - 100) {
+			/* mark output cut off */
+			len += snprintf(page + len, PAGE_SIZE - len, "(..)\n");
+			break;
+		} 
+
 		/* print only active entries & prevent division by zero */
 		if (!op->frames_abs)
 			continue;
@@ -394,15 +400,15 @@ int bcm_read_proc(char *page, char **start, off_t off, int count, int *eof, void
 
 		len += snprintf(page + len, PAGE_SIZE - len, "%s%ld%%\n",
 				(reduction == 100)?"near ":"", reduction);
+	}
+
+	list_for_each_entry(op, &ud->tx_ops, list) {
 
 		if (len >= PAGE_SIZE - 100) {
 			/* mark output cut off */
 			len += snprintf(page + len, PAGE_SIZE - len, "(..)\n");
 			break;
-		} 
-	}
-
-	list_for_each_entry(op, &ud->tx_ops, list) {
+		}
 
 		len += snprintf(page + len, PAGE_SIZE - len, "tx_op: %03X [%d] ",
 				op->can_id, op->nframes);
@@ -413,12 +419,6 @@ int bcm_read_proc(char *page, char **start, off_t off, int count, int *eof, void
 			len += snprintf(page + len, PAGE_SIZE - len, "t2=%ld ", op->j_ival2);
 
 		len += snprintf(page + len, PAGE_SIZE - len, "# sent %ld\n", op->frames_abs);
-
-		if (len >= PAGE_SIZE - 100) {
-			/* mark output cut off */
-			len += snprintf(page + len, PAGE_SIZE - len, "(..)\n");
-			break;
-		}
 	}
 
 	len += snprintf(page + len, PAGE_SIZE - len, "\n");
@@ -1335,34 +1335,34 @@ static void bcm_send_to_user(struct sock *sk, struct bcm_msg_head *head,
 
 static struct bcm_op *bcm_find_op(struct list_head *ops, canid_t can_id)
 {
-	struct bcm_op *op;
+	struct bcm_op *p;
 
-	list_for_each_entry(op, ops, list)
-		if (op->can_id == can_id)
-			return op;
+	list_for_each_entry(p, ops, list)
+		if (p->can_id == can_id)
+			return p;
 
 	return NULL;
 }
 
 static void bcm_delete_rx_op(struct list_head *ops, canid_t can_id)
 {
-	struct bcm_op *op, *n;
+	struct bcm_op *p, *n;
 
-	list_for_each_entry_safe(op, n, ops, list) {
-		if (op->can_id == can_id) {
-			DBG("removing rx_op (%p) for can_id <%03X>\n", op, op->can_id);
+	list_for_each_entry_safe(p, n, ops, list) {
+		if (p->can_id == can_id) {
+			DBG("removing rx_op (%p) for can_id <%03X>\n", p, p->can_id);
 
-			if (op->sk->sk_bound_dev_if) {
-				struct net_device *dev = dev_get_by_index(op->sk->sk_bound_dev_if);
+			if (p->sk->sk_bound_dev_if) {
+				struct net_device *dev = dev_get_by_index(p->sk->sk_bound_dev_if);
 				if (dev) {
-					can_rx_unregister(dev, op->can_id, BCM_RX_REGMASK, bcm_rx_handler, op);
+					can_rx_unregister(dev, p->can_id, BCM_RX_REGMASK, bcm_rx_handler, p);
 					dev_put(dev);
 				}
 			} else
-				DBG("sock %p not bound for can_rx_unregister()\n", op->sk);
+				DBG("sock %p not bound for can_rx_unregister()\n", p->sk);
 
-			list_del(&op->list);
-			bcm_remove_op(op);
+			list_del(&p->list);
+			bcm_remove_op(p);
 			return;
 		}
 	}
@@ -1370,14 +1370,14 @@ static void bcm_delete_rx_op(struct list_head *ops, canid_t can_id)
 
 static void bcm_delete_tx_op(struct list_head *ops, canid_t can_id)
 {
-	struct bcm_op *op, *n;
+	struct bcm_op *p, *n;
 
-	list_for_each_entry_safe(op, n, ops, list) {
-		if (op->can_id == can_id) {
+	list_for_each_entry_safe(p, n, ops, list) {
+		if (p->can_id == can_id) {
 			DBG("removing rx_op (%p) for can_id <%03X>\n",
-			    op, op->can_id);
-			list_del(&op->list);
-			bcm_remove_op(op);
+			    p, p->can_id);
+			list_del(&p->list);
+			bcm_remove_op(p);
 			return;
 		}
 	}
