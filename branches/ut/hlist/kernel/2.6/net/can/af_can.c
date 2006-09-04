@@ -535,13 +535,23 @@ void can_rx_unregister(struct net_device *dev, canid_t can_id, canid_t mask,
 		goto out;
 	}
 
+	/*  Search the receiver list for the item to delete.  This must
+	 *  must exist, since no receiver may be unregistered that hasn't
+	 *  been registered before.
+	 */
+
 	hlist_for_each_entry(p, n, q, list) {
 		if (p->can_id == can_id && p->mask == mask
 		    && p->func == func && p->data == data)
 			break;
 	}
 
-	if (!p) {
+	/*  Check for bug in CAN protocol implementations:
+	 *  If no matching list item was found, the list cursor variable n
+	 *  will be NULL, while p will point to the item of the list.
+	 */
+
+	if (!n) {
 		printk(KERN_ERR "CAN: receive list entry not found for "
 		       "dev %s, id %03X, mask %03X\n", dev->name, can_id, mask);
 		goto out;
