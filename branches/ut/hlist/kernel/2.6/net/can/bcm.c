@@ -375,12 +375,6 @@ int bcm_read_proc(char *page, char **start, off_t off, int count, int *eof, void
 
 		unsigned long reduction;
 
-		if (len >= PAGE_SIZE - 100) {
-			/* mark output cut off */
-			len += snprintf(page + len, PAGE_SIZE - len, "(..)\n");
-			break;
-		} 
-
 		/* print only active entries & prevent division by zero */
 		if (!op->frames_abs)
 			continue;
@@ -400,15 +394,15 @@ int bcm_read_proc(char *page, char **start, off_t off, int count, int *eof, void
 
 		len += snprintf(page + len, PAGE_SIZE - len, "%s%ld%%\n",
 				(reduction == 100)?"near ":"", reduction);
-	}
-
-	list_for_each_entry(op, &ud->tx_ops, list) {
 
 		if (len >= PAGE_SIZE - 100) {
 			/* mark output cut off */
 			len += snprintf(page + len, PAGE_SIZE - len, "(..)\n");
 			break;
-		}
+		} 
+	}
+
+	list_for_each_entry(op, &ud->tx_ops, list) {
 
 		len += snprintf(page + len, PAGE_SIZE - len, "tx_op: %03X [%d] ",
 				op->can_id, op->nframes);
@@ -419,6 +413,12 @@ int bcm_read_proc(char *page, char **start, off_t off, int count, int *eof, void
 			len += snprintf(page + len, PAGE_SIZE - len, "t2=%ld ", op->j_ival2);
 
 		len += snprintf(page + len, PAGE_SIZE - len, "# sent %ld\n", op->frames_abs);
+
+		if (len >= PAGE_SIZE - 100) {
+			/* mark output cut off */
+			len += snprintf(page + len, PAGE_SIZE - len, "(..)\n");
+			break;
+		}
 	}
 
 	len += snprintf(page + len, PAGE_SIZE - len, "\n");
