@@ -249,12 +249,12 @@ void can_dev_register(struct net_device *dev,
 void can_dev_unregister(struct net_device *dev,
 			void (*func)(unsigned long msg, void *), void *data)
 {
-	struct notifier_list *p;
+	struct notifier_list *p, *n;
 
 	DBG("called for %s\n", dev->name);
 
 	write_lock(&notifier_lock);
-	list_for_each_entry (p, &nlist, list) {
+	list_for_each_entry_safe(p, n, &nlist, list) {
 		if (p->dev == dev && p->func == func && p->data == data) {
 			list_del(&p->list);
 			kfree(p);
