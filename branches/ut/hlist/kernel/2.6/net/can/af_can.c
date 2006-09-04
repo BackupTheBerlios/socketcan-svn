@@ -512,6 +512,12 @@ void can_rx_register(struct net_device *dev, canid_t can_id, canid_t mask,
 	spin_unlock(&rcv_lists_lock);
 }
 
+void can_rx_delete(struct rcu_head *rp)
+{
+	struct rcv_list *r = container_of(rp, struct rcv_list, rcu);
+	kfree(r);
+}
+
 void can_rx_unregister(struct net_device *dev, canid_t can_id, canid_t mask,
 		       void (*func)(struct sk_buff *, void *), void *data)
 {
@@ -578,10 +584,8 @@ void can_rx_unregister(struct net_device *dev, canid_t can_id, canid_t mask,
  out:
 	spin_unlock(&rcv_lists_lock);
 
-	if (p) {
-		synchronize_rcu();
-		kfree(p);
-	}
+	if (p)
+		call_rcu(&p->rcu, can_rx_delete);
 }
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,14)

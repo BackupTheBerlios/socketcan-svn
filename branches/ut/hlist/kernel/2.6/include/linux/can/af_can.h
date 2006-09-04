@@ -139,6 +139,7 @@ struct rcv_list {
 	unsigned long matches;
 	void (*func)(struct sk_buff *, void *);
 	void *data;
+	struct rcu_head rcu;
 	char *ident;
 };
 
