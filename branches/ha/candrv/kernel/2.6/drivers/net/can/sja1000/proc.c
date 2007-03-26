@@ -53,13 +53,13 @@
 #include <linux/can.h>
 #include <linux/can/ioctl.h>
 #include "sja1000.h"
+#include "hal.h"
+
+extern struct net_device *can_dev[];
 
 static struct proc_dir_entry *pde       = NULL;
 static struct proc_dir_entry *pde_regs  = NULL;
 static struct proc_dir_entry *pde_reset = NULL;
-
-static struct net_device **can_dev;
-static int max_devices;
 
 static int sja1000_proc_read(char *page, char **start, off_t off,
 			     int count, int *eof, void *data)
@@ -70,14 +70,19 @@ static int sja1000_proc_read(char *page, char **start, off_t off,
 	struct can_priv *priv;
 	unsigned char stat;
 
-	len += snprintf(page + len, PAGE_SIZE - len, "CAN bus device statistics:\n");
-	len += snprintf(page + len, PAGE_SIZE - len, "       errwarn  overrun   wakeup   buserr   errpass  arbitr   restarts clock        baud\n");
-	for (i = 0; (i < max_devices) && (len < PAGE_SIZE - 200); i++) {
+	len += snprintf(page + len, PAGE_SIZE - len,
+			"CAN bus device statistics:\n");
+	len += snprintf(page + len, PAGE_SIZE - len,
+			"       errwarn  overrun   wakeup   buserr   "
+			"errpass  arbitr   restarts clock        baud\n");
+	for (i = 0; (i < MAXDEV) && (len < PAGE_SIZE - 200); i++) {
 		if (can_dev[i]) {
 			dev = can_dev[i];
-			stat = REG_READ(REG_SR);
+			stat = hw_readreg(dev->base_addr, REG_SR);
 			priv = netdev_priv(can_dev[i]);
-			len += snprintf(page + len, PAGE_SIZE - len, "can%d: %8d %8d %8d %8d %8d %8d %8d %10d %8d\n", i,
+			len += snprintf(page + len, PAGE_SIZE - len,
+					"can%d: %8d %8d %8d %8d %8d "
+					"%8d %8d %10d %8d\n", i,
 					priv->can_stats.error_warning,
 					priv->can_stats.data_overrun,
 					priv->can_stats.wakeup,
@@ -90,18 +95,20 @@ static int sja1000_proc_read(char *page, char **start, off_t off,
 				);
 			if (stat & 0x80) {
 				len += snprintf(page + len, PAGE_SIZE - len,
-					"can%d: bus status: BUS OFF, ", i);
+						"can%d: bus status: "
+						"BUS OFF, ", i);
 			} else if (stat & 0x40) {
 				len += snprintf(page + len, PAGE_SIZE - len,
-					"can%d: bus status: ERROR PASSIVE, ", i);
+						"can%d: bus status: ERROR "
+						"PASSIVE, ", i);
 			} else {
 				len += snprintf(page + len, PAGE_SIZE - len,
-					"can%d: bus status: OK, ", i);
+						"can%d: bus status: OK, ", i);
 			}
 			len += snprintf(page + len, PAGE_SIZE - len,
 					"RXERR: %d, TXERR: %d\n",
-					REG_READ(REG_RXERR),
-					REG_READ(REG_TXERR));
+					hw_readreg(dev->base_addr, REG_RXERR),
+					hw_readreg(dev->base_addr, REG_TXERR));
 		}
 	}
 
@@ -117,49 +124,55 @@ static int sja1000_proc_read_regs(char *page, char **start, off_t off,
 	int i;
 	struct can_priv	  *priv;
 
-	len = sprintf(page, "SJA1000 registers:\n");
-	for (i = 0; (i < max_devices) && (len < PAGE_SIZE - 200); i++) {
+	len = sprintf(page, "%s registers:\n", CHIP_NAME);
+	for (i = 0; (i < MAXDEV) && (len < PAGE_SIZE - 200); i++) {
 		if (can_dev[i]) {
 			dev = can_dev[i];
 			len += snprintf(page + len, PAGE_SIZE - len,
-					"can%d SJA1000 registers:\n", i);
+					"can%d %s registers:\n", i, CHIP_NAME);
 
 			priv = netdev_priv(can_dev[i]);
-			len += snprintf(page + len, PAGE_SIZE - len, "00: %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x\n",
-					REG_READ(0x00),
-					REG_READ(0x01),
-					REG_READ(0x02),
-					REG_READ(0x03),
-					REG_READ(0x04),
-					REG_READ(0x05),
-					REG_READ(0x06),
-					REG_READ(0x07),
-					REG_READ(0x08),
-					REG_READ(0x09),
-					REG_READ(0x0a),
-					REG_READ(0x0b),
-					REG_READ(0x0c),
-					REG_READ(0x0d),
-					REG_READ(0x0e),
-					REG_READ(0x0f)
+			len += snprintf(page + len, PAGE_SIZE - len,
+					"00: %02x %02x %02x %02x %02x %02x "
+					"%02x %02x %02x %02x %02x %02x %02x "
+					"%02x %02x %02x\n",
+					hw_readreg(dev->base_addr, 0x00),
+					hw_readreg(dev->base_addr, 0x01),
+					hw_readreg(dev->base_addr, 0x02),
+					hw_readreg(dev->base_addr, 0x03),
+					hw_readreg(dev->base_addr, 0x04),
+					hw_readreg(dev->base_addr, 0x05),
+					hw_readreg(dev->base_addr, 0x06),
+					hw_readreg(dev->base_addr, 0x07),
+					hw_readreg(dev->base_addr, 0x08),
+					hw_readreg(dev->base_addr, 0x09),
+					hw_readreg(dev->base_addr, 0x0a),
+					hw_readreg(dev->base_addr, 0x0b),
+					hw_readreg(dev->base_addr, 0x0c),
+					hw_readreg(dev->base_addr, 0x0d),
+					hw_readreg(dev->base_addr, 0x0e),
+					hw_readreg(dev->base_addr, 0x0f)
 				);
-			len += snprintf(page + len, PAGE_SIZE - len, "10: %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x\n",
-					REG_READ(0x10),
-					REG_READ(0x11),
-					REG_READ(0x12),
-					REG_READ(0x13),
-					REG_READ(0x14),
-					REG_READ(0x15),
-					REG_READ(0x16),
-					REG_READ(0x17),
-					REG_READ(0x18),
-					REG_READ(0x19),
-					REG_READ(0x1a),
-					REG_READ(0x1b),
-					REG_READ(0x1c),
-					REG_READ(0x1d),
-					REG_READ(0x1e),
-					REG_READ(0x1f)
+			len += snprintf(page + len, PAGE_SIZE - len,
+					"10: %02x %02x %02x %02x %02x %02x "
+					"%02x %02x %02x %02x %02x %02x %02x "
+					"%02x %02x %02x\n",
+					hw_readreg(dev->base_addr, 0x10),
+					hw_readreg(dev->base_addr, 0x11),
+					hw_readreg(dev->base_addr, 0x12),
+					hw_readreg(dev->base_addr, 0x13),
+					hw_readreg(dev->base_addr, 0x14),
+					hw_readreg(dev->base_addr, 0x15),
+					hw_readreg(dev->base_addr, 0x16),
+					hw_readreg(dev->base_addr, 0x17),
+					hw_readreg(dev->base_addr, 0x18),
+					hw_readreg(dev->base_addr, 0x19),
+					hw_readreg(dev->base_addr, 0x1a),
+					hw_readreg(dev->base_addr, 0x1b),
+					hw_readreg(dev->base_addr, 0x1c),
+					hw_readreg(dev->base_addr, 0x1d),
+					hw_readreg(dev->base_addr, 0x1e),
+					hw_readreg(dev->base_addr, 0x1f)
 				);
 		}
 	}
@@ -177,7 +190,7 @@ static int sja1000_proc_read_reset(char *page, char **start, off_t off,
 	struct can_priv   *priv;
 
 	len += snprintf(page + len, PAGE_SIZE - len, "resetting ");
-	for (i = 0; (i < max_devices) && (len < PAGE_SIZE - 200); i++) {
+	for (i = 0; (i < MAXDEV) && (len < PAGE_SIZE - 200); i++) {
 		if (can_dev[i]) {
 			dev = can_dev[i];
 			priv = netdev_priv(can_dev[i]);
@@ -204,12 +217,9 @@ static int sja1000_proc_read_reset(char *page, char **start, off_t off,
 	return len;
 }
 
-void sja1000_proc_init(const char *drv_name, struct net_device **dev, int max)
+void sja1000_proc_create(const char *drv_name)
 {
 	char fname[256];
-
-	can_dev     = dev;
-	max_devices = max;
 
 	if (pde == NULL) {
 		sprintf(fname, PROCBASE "/%s", drv_name);
@@ -228,7 +238,7 @@ void sja1000_proc_init(const char *drv_name, struct net_device **dev, int max)
 	}
 }
 
-void sja1000_proc_delete(const char *drv_name)
+void sja1000_proc_remove(const char *drv_name)
 {
 	char fname[256];
 

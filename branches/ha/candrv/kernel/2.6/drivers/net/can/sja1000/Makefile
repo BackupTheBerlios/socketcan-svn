@@ -59,10 +59,11 @@ EXTRA_CFLAGS += -I$(KBUILD_EXTMOD)/../../../include \
 		-DARPHRD_CAN=280
 endif
 
-obj-m := sja1000-isa.o sja1000-gw2.o sja1000-mem.o
+obj-m := sja1000-io.o sja1000-iomem.o sja1000-iomux.o sja1000-gw2.o
 
-sja1000-mem-objs := mem.o        sja1000.o proc.o
-sja1000-isa-objs := isa.o        sja1000.o proc.o
-sja1000-gw2-objs := trajet-gw2.o sja1000.o proc.o
+sja1000-io-objs    := io.o    sja1000.o proc.o
+sja1000-iomem-objs := iomem.o sja1000.o proc.o
+sja1000-iomux-objs := iomux.o sja1000.o proc.o
+sja1000-gw2-objs   := gw2.o   sja1000.o proc.o
 
 endif

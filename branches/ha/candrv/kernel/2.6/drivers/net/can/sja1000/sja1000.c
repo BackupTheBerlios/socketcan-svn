@@ -6,7 +6,7 @@
  * Copyright (c) 2003 Matthias Brukner, Trajet Gmbh, Rebenring 33,
  * 38106 Braunschweig, GERMANY
  *
- * Copyright (c) 2002-2005 Volkswagen Group Electronic Research
+ * Copyright (c) 2002-2007 Volkswagen Group Electronic Research
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -49,27 +49,45 @@
 
 #include <linux/autoconf.h>
 #include <linux/module.h>
-#include <linux/ioport.h>
-#include <linux/slab.h>
+#include <linux/init.h>
+#include <linux/kernel.h>
+#include <linux/sched.h>
+#include <linux/types.h>
+#include <linux/fcntl.h>
+#include <linux/interrupt.h>
+#include <linux/ptrace.h>
+#include <linux/string.h>
+#include <linux/errno.h>
 #include <linux/netdevice.h>
 #include <linux/if_arp.h>
 #include <linux/if_ether.h>
 #include <linux/skbuff.h>
-#include <asm/io.h>
 
 #include <linux/can.h>
-#include <linux/can/ioctl.h>
+#include <linux/can/ioctl.h> /* for struct can_device_stats */
 #include "sja1000.h"
+#include "hal.h"
+
+MODULE_AUTHOR("Oliver Hartkopp <oliver.hartkopp@volkswagen.de>");
+MODULE_LICENSE("Dual BSD/GPL");
+MODULE_DESCRIPTION("LLCF/socketcan '" CHIP_NAME "' network device driver");
 
 #ifdef CONFIG_CAN_DEBUG_DEVICES
 #define DBG(args...)   ((priv->debug > 0) ? printk(args) : 0)
-#define iDBG(args...)  ((priv->debug > 1) ? printk(args) : 0)  /* logging in interrupt context */
-#define iiDBG(args...) ((priv->debug > 2) ? printk(args) : 0)  /* logging in interrupt context */
+/* logging in interrupt context! */
+#define iDBG(args...)  ((priv->debug > 1) ? printk(args) : 0)
+#define iiDBG(args...) ((priv->debug > 2) ? printk(args) : 0)
 #else
 #define DBG(args...)
 #define iDBG(args...)
 #define iiDBG(args...)
 #endif
+
+char drv_name[DRV_NAME_LEN] = "undefined";
+
+/* driver and version information */
+static const char *drv_version	= "0.1.0";
+static const char *drv_reldate	= "2007-03-26";
 
 #ifdef CONFIG_CAN_DEBUG_DEVICES
 static const char *ecc_errors[] = {
@@ -115,13 +133,144 @@ static const char *ecc_types[] = {
 };
 #endif
 
-/* declarations */
+/* array of all can chips */
+struct net_device *can_dev[MAXDEV];
+
+/* module parameters */
+unsigned long base[MAXDEV]	= { 0 }; /* hardware address */
+unsigned long rbase[MAXDEV]	= { 0 }; /* (remapped) device address */
+unsigned int  irq[MAXDEV]	= { 0 };
+
+unsigned int speed[MAXDEV]	= { 0 };
+unsigned int btr[MAXDEV]	= { 0 };
+
+static int rx_probe[MAXDEV]	= { 0 };
+static int clk			= DEFAULT_HW_CLK;
+static int debug		= 0;
+static int restart_ms		= 100;
+
+static int base_n;
+static int irq_n;
+static int speed_n;
+static int btr_n;
+static int rx_probe_n;
+
+module_param_array(base, int, &base_n, 0);
+module_param_array(irq, int, &irq_n, 0);
+module_param_array(speed, int, &speed_n, 0);
+module_param_array(btr, int, &btr_n, 0);
+module_param_array(rx_probe, int, &rx_probe_n, 0);
+
+module_param(clk, int, 0);
+module_param(debug, int, 0);
+module_param(restart_ms, int, 0);
+
+
+/* function declarations */
 
 static void can_restart_dev(unsigned long data);
 static void chipset_init(struct net_device *dev, int wake);
 static void chipset_init_rx(struct net_device *dev);
 static void chipset_init_trx(struct net_device *dev);
+static void can_netdev_setup(struct net_device *dev);
+static struct net_device* can_create_netdev(int dev_num);
+static int  can_set_drv_name(void);
+int set_reset_mode(struct net_device *dev);
+static int sja1000_probe_chip(unsigned long base);
 
+static __exit void sja1000_exit_module(void)
+{
+	int i, ret;
+
+	for (i = 0; i < MAXDEV; i++) {
+		if (can_dev[i] != NULL) {
+			struct can_priv *priv = netdev_priv(can_dev[i]);
+			unregister_netdev(can_dev[i]);
+			del_timer(&priv->timer);
+			hal_release_region(i, SJA1000_IO_SIZE_BASIC);
+			free_netdev(can_dev[i]);
+		}
+	}
+	sja1000_proc_remove(drv_name);
+
+	if ((ret = hal_exit()))
+		printk(KERN_INFO "%s: hal_exit error %d.\n", drv_name, ret);
+}
+
+static __init int sja1000_init_module(void)
+{
+	int i, ret;
+	struct net_device *dev;
+
+	if ((ret = hal_init()))
+		return ret;
+
+	if ((ret = can_set_drv_name()))
+		return ret;
+
+	if (clk < 1000 ) /* MHz command line value */
+		clk *= 1000000;
+
+	if (clk < 1000000 ) /* kHz command line value */
+		clk *= 1000;
+
+	printk(KERN_INFO "%s driver v%s (%s)\n",
+	       drv_name, drv_version, drv_reldate);
+	printk(KERN_INFO "%s - options [clk %d.%06d MHz] [restart_ms %dms]"
+	       " [debug %d]\n",
+	       drv_name, clk/1000000, clk%1000000, restart_ms, debug);
+
+	if (!base[0]) {
+		printk(KERN_INFO "%s: loading defaults.\n", drv_name);
+		hal_use_defaults();
+	}
+		
+	for (i = 0; base[i]; i++) {
+		printk(KERN_DEBUG "%s: checking for %s on address 0x%lX ...\n",
+		       drv_name, CHIP_NAME, base[i]);
+
+		if (!hal_request_region(i, SJA1000_IO_SIZE_BASIC, drv_name)) {
+			printk(KERN_ERR "%s: memory already in use\n",
+			       drv_name);
+			sja1000_exit_module();
+			return -EBUSY;
+		}
+
+		hw_attach(i);
+		hw_reset_dev(i);
+
+		if (!sja1000_probe_chip(base[i])) {
+			printk(KERN_ERR "%s: probably missing controller"
+			       " hardware\n", drv_name);
+			hal_release_region(i, SJA1000_IO_SIZE_BASIC);
+			sja1000_exit_module();
+			return -ENODEV;
+		}
+
+		dev = can_create_netdev(i);
+
+		if (dev != NULL) {
+			can_dev[i] = dev;
+			set_reset_mode(dev);
+			sja1000_proc_create(drv_name);
+		} else {
+			can_dev[i] = NULL;
+			hw_detach(i);
+			hal_release_region(i, SJA1000_IO_SIZE_BASIC);
+		}
+	}
+	return 0;
+}
+
+static int sja1000_probe_chip(unsigned long base)
+{
+	if (base && (hw_readreg(base, 0) == 0xFF)) {
+		printk(KERN_INFO "%s: probing @0x%lX failed\n",
+		       drv_name, base);
+		return 0;
+	}
+	return 1;
+}
 
 /*
  * set baud rate divisor values
@@ -130,12 +279,13 @@ static void set_btr(struct net_device *dev, int btr0, int btr1)
 {
 	struct can_priv *priv = netdev_priv(dev);
 
-	if (priv->state == STATE_UNINITIALIZED) /* no bla bla when restarting the device */
+	/* no bla bla when restarting the device */
+	if (priv->state == STATE_UNINITIALIZED)
 		printk(KERN_INFO "%s: setting BTR0=%02X BTR1=%02X\n",
 		       dev->name, btr0, btr1);
 
-	REG_WRITE(REG_BTR0, btr0);
-	REG_WRITE(REG_BTR1, btr1);
+	hw_writereg(dev->base_addr, REG_BTR0, btr0);
+	hw_writereg(dev->base_addr, REG_BTR1, btr1);
 }
 
 /*
@@ -160,7 +310,9 @@ static void set_baud(struct net_device *dev, int baud, int clock)
 
 	clock >>= 1;
 
-	for (tseg = (0 + 0 + 2) * 2; tseg <= (MAX_TSEG2 + MAX_TSEG1 + 2) * 2 + 1; tseg++) {
+	for (tseg = (0 + 0 + 2) * 2;
+	     tseg <= (MAX_TSEG2 + MAX_TSEG1 + 2) * 2 + 1;
+	     tseg++) {
 		brp = clock / ((1 + tseg / 2) * baud) + tseg % 2;
 		if ((brp > 0) && (brp <= 64)) {
 			error = baud - clock / (brp * (1 + tseg / 2));
@@ -193,7 +345,8 @@ static void set_baud(struct net_device *dev, int baud, int clock)
 		tseg2 = best_tseg - tseg1 - 2;
 	}
 
-	priv->btr = ((best_brp | JUMPWIDTH)<<8) + ((SAM << 7) | (tseg2 << 4) | tseg1);
+	priv->btr = ((best_brp | JUMPWIDTH)<<8) + 
+		((SAM << 7) | (tseg2 << 4) | tseg1);
 
 	printk(KERN_INFO "%s: calculated best baudrate: %d / btr is 0x%04X\n",
 	       dev->name, best_baud, priv->btr);
@@ -205,13 +358,13 @@ static void set_baud(struct net_device *dev, int baud, int clock)
 int set_reset_mode(struct net_device *dev)
 {
 	struct can_priv *priv = netdev_priv(dev);
-	unsigned char status = REG_READ(REG_MOD);
+	unsigned char status = hw_readreg(dev->base_addr, REG_MOD);
 	int i;
 
 	priv->can_stats.bus_error_at_init = priv->can_stats.bus_error;
 
 	/* disable interrupts */
-	REG_WRITE(REG_IER, IRQ_OFF);
+	hw_writereg(dev->base_addr, REG_IER, IRQ_OFF);
 
 	for (i = 0; i < 10; i++) {
 		/* check reset bit */
@@ -224,19 +377,20 @@ int set_reset_mode(struct net_device *dev)
 			return 0;
 		}
 
-		REG_WRITE(REG_MOD, MOD_RM); /* reset chip */
-		status = REG_READ(REG_MOD);
+		hw_writereg(dev->base_addr, REG_MOD, MOD_RM); /* reset chip */
+		status = hw_readreg(dev->base_addr, REG_MOD);
 
 	}
 
-	printk(KERN_ERR "%s: setting sja1000 into reset mode failed!\n", dev->name);
+	printk(KERN_ERR "%s: setting sja1000 into reset mode failed!\n",
+	       dev->name);
 	return 1;
 
 }
 
 static int set_normal_mode(struct net_device *dev)
 {
-	unsigned char status = REG_READ(REG_MOD);
+	unsigned char status = hw_readreg(dev->base_addr, REG_MOD);
 	int i;
 
 	for (i = 0; i < 10; i++) {
@@ -252,18 +406,20 @@ static int set_normal_mode(struct net_device *dev)
 			return 0;
 		}
 
-		REG_WRITE(REG_MOD, 0x00); /* set chip to normal mode */
-		status = REG_READ(REG_MOD);
+		/* set chip to normal mode */
+		hw_writereg(dev->base_addr, REG_MOD, 0x00);
+		status = hw_readreg(dev->base_addr, REG_MOD);
 	}
 
-	printk(KERN_ERR "%s: setting sja1000 into normal mode failed!\n", dev->name);
+	printk(KERN_ERR "%s: setting sja1000 into normal mode failed!\n",
+	       dev->name);
 	return 1;
 
 }
 
 static int set_listen_mode(struct net_device *dev)
 {
-	unsigned char status = REG_READ(REG_MOD);
+	unsigned char status = hw_readreg(dev->base_addr, REG_MOD);
 	int i;
 
 	for (i = 0; i < 10; i++) {
@@ -280,11 +436,12 @@ static int set_listen_mode(struct net_device *dev)
 		}
 
 		/* set listen only mode, clear reset */
-		REG_WRITE(REG_MOD, MOD_LOM);
-		status = REG_READ(REG_MOD);
+		hw_writereg(dev->base_addr, REG_MOD, MOD_LOM);
+		status = hw_readreg(dev->base_addr, REG_MOD);
 	}
 
-	printk(KERN_ERR "%s: setting sja1000 into listen mode failed!\n", dev->name);
+	printk(KERN_ERR "%s: setting sja1000 into listen mode failed!\n",
+	       dev->name);
 	return 1;
 
 }
@@ -300,20 +457,25 @@ static int set_listen_mode(struct net_device *dev)
 static void chipset_init_regs(struct net_device *dev)
 {
 	struct can_priv *priv = netdev_priv(dev);
+	unsigned long base = dev->base_addr;
 
 	/* go into Pelican mode, disable clkout, disable comparator */
-	REG_WRITE(REG_CDR, 0xCF);
+	hw_writereg(base, REG_CDR, 0xCF);
+
+	/* output control */
+	/* connected to external transceiver */
+	hw_writereg(base, REG_OCR, 0x1A);
 
 	/* set acceptance filter (accept all) */
-	REG_WRITE(REG_ACCC0, 0x00);
-	REG_WRITE(REG_ACCC1, 0x00);
-	REG_WRITE(REG_ACCC2, 0x00);
-	REG_WRITE(REG_ACCC3, 0x00);
+	hw_writereg(base, REG_ACCC0, 0x00);
+	hw_writereg(base, REG_ACCC1, 0x00);
+	hw_writereg(base, REG_ACCC2, 0x00);
+	hw_writereg(base, REG_ACCC3, 0x00);
 
-	REG_WRITE(REG_ACCM0, 0xFF);
-	REG_WRITE(REG_ACCM1, 0xFF);
-	REG_WRITE(REG_ACCM2, 0xFF);
-	REG_WRITE(REG_ACCM3, 0xFF);
+	hw_writereg(base, REG_ACCM0, 0xFF);
+	hw_writereg(base, REG_ACCM1, 0xFF);
+	hw_writereg(base, REG_ACCM2, 0xFF);
+	hw_writereg(base, REG_ACCM3, 0xFF);
 
 	/* set baudrate */
 	if (priv->btr) { /* no calculation when btr is provided */
@@ -326,8 +488,8 @@ static void chipset_init_regs(struct net_device *dev)
 	}
 
 	/* output control */
-	REG_WRITE(REG_OCR, 0x1A);	/* connected to external transceiver */
-
+	/* connected to external transceiver */
+	hw_writereg(base, REG_OCR, 0x1A);
 }
 
 static void chipset_init(struct net_device *dev, int wake)
@@ -361,7 +523,7 @@ static void chipset_init_rx(struct net_device *dev)
 	priv->state = STATE_PROBE;
 
 	/* enable receive and error interrupts */
-	REG_WRITE(REG_IER, IRQ_RI | IRQ_EI);
+	hw_writereg(dev->base_addr, REG_IER, IRQ_RI | IRQ_EI);
 }
 
 static void chipset_init_trx(struct net_device *dev)
@@ -382,7 +544,7 @@ static void chipset_init_trx(struct net_device *dev)
 	priv->state = STATE_ACTIVE;
 
 	/* enable all interrupts */
-	REG_WRITE(REG_IER, IRQ_ALL);
+	hw_writereg(dev->base_addr, REG_IER, IRQ_ALL);
 }
 
 /*
@@ -393,8 +555,9 @@ static void chipset_init_trx(struct net_device *dev)
  */
 static int can_start_xmit(struct sk_buff *skb, struct net_device *dev)
 {
-	struct can_priv  *priv = netdev_priv(dev);
-	struct can_frame *cf   = (struct can_frame*)skb->data;
+	struct can_priv  *priv	= netdev_priv(dev);
+	struct can_frame *cf	= (struct can_frame*)skb->data;
+	unsigned long base	= dev->base_addr;
 	uint8_t	fi;
 	uint8_t	dlc;
 	canid_t	id;
@@ -412,23 +575,23 @@ static int can_start_xmit(struct sk_buff *skb, struct net_device *dev)
 	if (id & CAN_EFF_FLAG) {
 		fi |= FI_FF;
 		dreg = EFF_BUF;
-		REG_WRITE(REG_FI, fi);
-		REG_WRITE(REG_ID1, (id & 0x1fe00000) >> (5 + 16));
-		REG_WRITE(REG_ID2, (id & 0x001fe000) >> (5 + 8));
-		REG_WRITE(REG_ID3, (id & 0x00001fe0) >> 5);
-		REG_WRITE(REG_ID4, (id & 0x0000001f) << 3);
+		hw_writereg(base, REG_FI, fi);
+		hw_writereg(base, REG_ID1, (id & 0x1fe00000) >> (5 + 16));
+		hw_writereg(base, REG_ID2, (id & 0x001fe000) >> (5 + 8));
+		hw_writereg(base, REG_ID3, (id & 0x00001fe0) >> 5);
+		hw_writereg(base, REG_ID4, (id & 0x0000001f) << 3);
 	} else {
 		dreg = SFF_BUF;
-		REG_WRITE(REG_FI, fi);
-		REG_WRITE(REG_ID1, (id & 0x000007f8) >> 3);
-		REG_WRITE(REG_ID2, (id & 0x00000007) << 5);
+		hw_writereg(base, REG_FI, fi);
+		hw_writereg(base, REG_ID1, (id & 0x000007f8) >> 3);
+		hw_writereg(base, REG_ID2, (id & 0x00000007) << 5);
 	}
 
 	for (i = 0; i < dlc; i++) {
-		REG_WRITE(dreg++, cf->data[i]);
+		hw_writereg(base, dreg++, cf->data[i]);
 	}
 
-	REG_WRITE(REG_CMR, CMD_TR);
+	hw_writereg(base, REG_CMR, CMD_TR);
 
 	priv->stats.tx_bytes += dlc;
 
@@ -517,7 +680,8 @@ static void can_restart_now(struct net_device *dev)
 
 static void can_rx(struct net_device *dev)
 {
-	struct can_priv *priv = netdev_priv(dev);
+	struct can_priv *priv	= netdev_priv(dev);
+	unsigned long base	= dev->base_addr;
 	struct can_frame *cf;
 	struct sk_buff	*skb;
 	uint8_t	fi;
@@ -533,21 +697,22 @@ static void can_rx(struct net_device *dev)
 	skb->dev = dev;
 	skb->protocol = htons(ETH_P_CAN);
 
-	fi = REG_READ(REG_FI);
+	fi = hw_readreg(base, REG_FI);
 	dlc = fi & 0x0F;
 
 	if (fi & FI_FF) {
 		/* extended frame format (EFF) */
 		dreg = EFF_BUF;
-		id = (REG_READ(REG_ID1) << (5+16))
-			| (REG_READ(REG_ID2) << (5+8))
-			| (REG_READ(REG_ID3) << 5)
-			| (REG_READ(REG_ID4) >> 3);
+		id = (hw_readreg(base, REG_ID1) << (5+16))
+			| (hw_readreg(base, REG_ID2) << (5+8))
+			| (hw_readreg(base, REG_ID3) << 5)
+			| (hw_readreg(base, REG_ID4) >> 3);
 		id |= CAN_EFF_FLAG;
 	} else {
 		/* standard frame format (SFF) */
 		dreg = SFF_BUF;
-		id = (REG_READ(REG_ID1) << 3) | (REG_READ(REG_ID2) >> 5);
+		id = (hw_readreg(base, REG_ID1) << 3)
+			| (hw_readreg(base, REG_ID2) >> 5);
 	}
 
 	if (fi & FI_RTR)
@@ -558,13 +723,13 @@ static void can_rx(struct net_device *dev)
 	cf->can_id    = id;
 	cf->can_dlc   = dlc;
 	for (i = 0; i < dlc; i++) {
-		cf->data[i] = REG_READ(dreg++);
+		cf->data[i] = hw_readreg(base, dreg++);
 	}
 	while (i < 8)
 		cf->data[i++] = 0;
 
 	/* release receive buffer */
-	REG_WRITE(REG_CMR, CMD_RRB);
+	hw_writereg(base, REG_CMR, CMD_RRB);
 
 	netif_rx(skb);
 
@@ -600,28 +765,39 @@ static int can_ioctl(struct net_device *dev, struct ifreq *rq, int cmd)
 /*
  * SJA1000 interrupt handler
  */
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,20)
 static irqreturn_t can_interrupt(int irq, void *dev_id, struct pt_regs *regs)
+#else
+static irqreturn_t can_interrupt(int irq, void *dev_id)
+#endif
 {
-	struct net_device *dev = (struct net_device*)dev_id;
-	struct can_priv *priv = netdev_priv(dev);
+	struct net_device *dev	= (struct net_device*)dev_id;
+	struct can_priv *priv	= netdev_priv(dev);
+	unsigned long base	= dev->base_addr;
 	uint8_t isrc, status, ecc, alc;
 	int n = 0;
 
+	hw_preirq(dev);
+
 	if (priv->state == STATE_UNINITIALIZED) {
-		printk(KERN_ERR "%s: %s: uninitialized controller!\n", dev->name, __FUNCTION__);
-		chipset_init(dev, 1); /* this should be possible at this stage */
+		printk(KERN_ERR "%s: %s: uninitialized controller!\n",
+		       dev->name, __FUNCTION__);
+		chipset_init(dev, 1); /* should be possible at this stage */
 		return IRQ_NONE;
 	}
 
 	if (priv->state == STATE_RESET_MODE) {
-		iiDBG(KERN_ERR "%s: %s: controller is in reset mode! MOD=0x%02X IER=0x%02X IR=0x%02X SR=0x%02X!\n",
-		      dev->name, __FUNCTION__, REG_READ(REG_MOD), REG_READ(REG_IER), REG_READ(REG_IR), REG_READ(REG_SR));
+		iiDBG(KERN_ERR "%s: %s: controller is in reset mode! "
+		      "MOD=0x%02X IER=0x%02X IR=0x%02X SR=0x%02X!\n",
+		      dev->name, __FUNCTION__, hw_readreg(base, REG_MOD),
+		      hw_readreg(base, REG_IER), hw_readreg(base, REG_IR),
+		      hw_readreg(base, REG_SR));
 		return IRQ_NONE;
 	}
 
-	while ((isrc = REG_READ(REG_IR)) && (n < 20)) {
+	while ((isrc = hw_readreg(base, REG_IR)) && (n < 20)) {
 		n++;
-		status = REG_READ(REG_SR);
+		status = hw_readreg(base, REG_SR);
 
 		if (isrc & IRQ_WUI) {
 			/* wake-up interrupt */
@@ -637,92 +813,113 @@ static irqreturn_t can_interrupt(int irq, void *dev_id, struct pt_regs *regs)
 
 			while (status & SR_RBS) {
 				can_rx(dev);
-				status = REG_READ(REG_SR);
+				status = hw_readreg(base, REG_SR);
 			}
-			if (priv->state == STATE_PROBE) { /* valid RX -> switch to trx-mode */
+			if (priv->state == STATE_PROBE) {
+				/* valid RX -> switch to trx-mode */
 				iDBG(KERN_INFO "%s: RI #%d#\n", dev->name, n);
 				chipset_init_trx(dev); /* no tx queue wakeup */
-				break; /* check again after initializing the controller */
+				break; /* check again after init controller */
 			}
 		}
 		if (isrc & IRQ_DOI) {
 			/* data overrun interrupt */
-			iiDBG(KERN_INFO "%s: data overrun isrc=0x%02X status=0x%02X\n",
+			iiDBG(KERN_INFO "%s: data overrun isrc=0x%02X "
+			      "status=0x%02X\n",
 			      dev->name, isrc, status);
 			iDBG(KERN_INFO "%s: DOI #%d#\n", dev->name, n);
 			priv->can_stats.data_overrun++;
-			REG_WRITE(REG_CMR, CMD_CDO); /* clear bit */
+			hw_writereg(base, REG_CMR, CMD_CDO); /* clear bit */
 		}
 		if (isrc & IRQ_EI) {
 			/* error warning interrupt */
-			iiDBG(KERN_INFO "%s: error warning isrc=0x%02X status=0x%02X\n",
+			iiDBG(KERN_INFO "%s: error warning isrc=0x%02X "
+			      "status=0x%02X\n",
 			      dev->name, isrc, status);
 			iDBG(KERN_INFO "%s: EI #%d#\n", dev->name, n);
 			priv->can_stats.error_warning++;
 			if (status & SR_BS) {
-				printk(KERN_INFO "%s: BUS OFF, restarting device\n", dev->name);
+				printk(KERN_INFO "%s: BUS OFF, "
+				       "restarting device\n", dev->name);
 				can_restart_on(dev);
-				return IRQ_HANDLED; /* controller has been restarted, so we leave here */
+				/* controller has been restarted: leave here */
+				return IRQ_HANDLED;
 			} else if (status & SR_ES) {
 				iDBG(KERN_INFO "%s: error\n", dev->name);
 			}
 		}
 		if (isrc & IRQ_BEI) {
 			/* bus error interrupt */
-			iiDBG(KERN_INFO "%s: bus error isrc=0x%02X status=0x%02X\n",
+			iiDBG(KERN_INFO "%s: bus error isrc=0x%02X "
+			      "status=0x%02X\n",
 			      dev->name, isrc, status);
 			iDBG(KERN_INFO "%s: BEI #%d# [%d]\n", dev->name, n,
-			     priv->can_stats.bus_error - priv->can_stats.bus_error_at_init);
+			     priv->can_stats.bus_error - 
+			     priv->can_stats.bus_error_at_init);
 			priv->can_stats.bus_error++;
-			ecc = REG_READ(REG_ECC);
+			ecc = hw_readreg(base, REG_ECC);
 			iDBG(KERN_INFO "%s: ECC = 0x%02X (%s, %s, %s)\n",
 			     dev->name, ecc,
 			     (ecc & ECC_DIR) ? "RX" : "TX",
 			     ecc_types[ecc >> ECC_ERR],
 			     ecc_errors[ecc & ECC_SEG]);
 
-			/* when the bus errors flood the system, restart the controller */
-			if (priv->can_stats.bus_error_at_init + MAX_BUS_ERRORS < priv->can_stats.bus_error) {
-				iDBG(KERN_INFO "%s: heavy bus errors, restarting device\n", dev->name);
+			/* when the bus errors flood the system, */
+			/* restart the controller                */
+			if (priv->can_stats.bus_error_at_init +
+			    MAX_BUS_ERRORS < priv->can_stats.bus_error) {
+				iDBG(KERN_INFO "%s: heavy bus errors,"
+				     " restarting device\n", dev->name);
 				can_restart_on(dev);
-				return IRQ_HANDLED; /* controller has been restarted, so we leave here */
+				/* controller has been restarted: leave here */
+				return IRQ_HANDLED;
 			}
 #if 1
-			/* don't know, if this is a good idea, but it works fine ... */
-			if (REG_READ(REG_RXERR) > 128) {
-				iDBG(KERN_INFO "%s: RX_ERR > 128, restarting device\n", dev->name);
+			/* don't know, if this is a good idea, */
+			/* but it works fine ...               */
+			if (hw_readreg(base, REG_RXERR) > 128) {
+				iDBG(KERN_INFO "%s: RX_ERR > 128,"
+				     " restarting device\n", dev->name);
 				can_restart_on(dev);
-				return IRQ_HANDLED; /* controller has been restarted, so we leave here */
+				/* controller has been restarted: leave here */
+				return IRQ_HANDLED;
 			}
 #endif
 		}
 		if (isrc & IRQ_EPI) {
 			/* error passive interrupt */
-			iiDBG(KERN_INFO "%s: error passive isrc=0x%02X status=0x%02X\n",
+			iiDBG(KERN_INFO "%s: error passive isrc=0x%02X"
+			      " status=0x%02X\n",
 			      dev->name, isrc, status);
 			iDBG(KERN_INFO "%s: EPI #%d#\n", dev->name, n);
 			priv->can_stats.error_passive++;
 			if (status & SR_ES) {
-				iDBG(KERN_INFO "%s: -> ERROR PASSIVE, restarting device\n", dev->name);
+				iDBG(KERN_INFO "%s: -> ERROR PASSIVE, "
+				     "restarting device\n", dev->name);
 				can_restart_on(dev);
-				return IRQ_HANDLED; /* controller has been restarted, so we leave here */
+				/* controller has been restarted: leave here */
+				return IRQ_HANDLED;
 			} else {
-				iDBG(KERN_INFO "%s: -> ERROR ACTIVE\n", dev->name);
+				iDBG(KERN_INFO "%s: -> ERROR ACTIVE\n",
+				     dev->name);
 			}
 		}
 		if (isrc & IRQ_ALI) {
 			/* arbitration lost interrupt */
-			iiDBG(KERN_INFO "%s: error arbitration lost isrc=0x%02X status=0x%02X\n",
+			iiDBG(KERN_INFO "%s: error arbitration lost "
+			      "isrc=0x%02X status=0x%02X\n",
 			      dev->name, isrc, status);
 			iDBG(KERN_INFO "%s: ALI #%d#\n", dev->name, n);
 			priv->can_stats.arbitration_lost++;
-			alc = REG_READ(REG_ALC);
+			alc = hw_readreg(base, REG_ALC);
 			iDBG(KERN_INFO "%s: ALC = 0x%02X\n", dev->name, alc);
 		}
 	}
 	if (n > 1) {
 		iDBG(KERN_INFO "%s: handled %d IRQs\n", dev->name, n);
 	}
+
+	hw_postirq(dev);
 
 	return n == 0 ? IRQ_NONE : IRQ_HANDLED;
 }
@@ -740,8 +937,13 @@ static int can_open(struct net_device *dev)
 	priv->state = STATE_UNINITIALIZED;
 
 	/* register interrupt handler */
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,20)
 	if (request_irq(dev->irq, &can_interrupt, SA_SHIRQ,
 			dev->name, (void*)dev)) {
+#else
+	if (request_irq(dev->irq, &can_interrupt, IRQF_SHARED,
+			dev->name, (void*)dev)) {
+#endif
 		return -EAGAIN;
 	}
 
@@ -783,41 +985,30 @@ static int can_close(struct net_device *dev)
 }
 
 #if 0
-static uint8_t reg_read(struct net_device *dev, int reg)
-{
-	return readb(dev->base_addr + reg);
-}
-
-static void reg_write(struct net_device *dev, int reg, uint8_t val)
-{
-	writeb(val, dev->base_addr + reg);
-}
-
 static void test_if(struct net_device *dev)
 {
 	int i;
 	int j;
 	int x;
 
-	REG_WRITE(REG_CDR, 0xCF);
+	hw_writereg(base, REG_CDR, 0xCF);
 	for (i = 0; i < 10000; i++) {
 		for (j = 0; j < 256; j++) {
-			REG_WRITE(REG_EWL, j);
-			x = REG_READ(REG_EWL);
+			hw_writereg(base, REG_EWL, j);
+			x = hw_readreg(base, REG_EWL);
 			if (x != j) {
-				printk(KERN_INFO "%s: is: %02X expected: %02X (%d)\n", dev->name, x, j, i);
+				printk(KERN_INFO "%s: is: %02X expected: "
+				       "%02X (%d)\n", dev->name, x, j, i);
 			}
 		}
 	}
 }
 #endif
 
-void sja1000_setup(struct net_device *dev)
+void can_netdev_setup(struct net_device *dev)
 {
-	struct can_priv *priv = netdev_priv(dev);
-
 	/* Fill in the the fields of the device structure
-	   with CAN/LLCF generic values */
+	   with CAN netdev generic values */
 
 	dev->change_mtu			= NULL;
 	dev->hard_header		= NULL;
@@ -836,17 +1027,72 @@ void sja1000_setup(struct net_device *dev)
 	dev->flags			= IFF_NOARP;
 	dev->features			= NETIF_F_NO_CSUM;
 
-	dev->open		= can_open;
-	dev->stop		= can_close;
-	dev->hard_start_xmit	= can_start_xmit;
-	dev->get_stats		= can_get_stats;
-	dev->do_ioctl           = can_ioctl;
+	dev->open			= can_open;
+	dev->stop			= can_close;
+	dev->hard_start_xmit		= can_start_xmit;
+	dev->get_stats			= can_get_stats;
+	dev->do_ioctl           	= can_ioctl;
 
-	dev->tx_timeout		= can_tx_timeout;
-	dev->watchdog_timeo	= TX_TIMEOUT;
+	dev->tx_timeout			= can_tx_timeout;
+	dev->watchdog_timeo		= TX_TIMEOUT;
+
+	SET_MODULE_OWNER(dev);
+}
+
+static struct net_device* can_create_netdev(int dev_num)
+{
+	struct net_device	*dev;
+	struct can_priv		*priv;
+
+	if (!(dev = alloc_netdev(sizeof(struct can_priv), CAN_NETDEV_NAME,
+				 can_netdev_setup))) {
+		printk(KERN_ERR "%s: out of memory\n", CHIP_NAME);
+		return NULL;
+	}
+
+	printk(KERN_INFO "%s: base 0x%lX / irq %d / speed %d / "
+	       "btr 0x%X / rx_probe %d\n",
+	       drv_name, rbase[dev_num], irq[dev_num],
+	       speed[dev_num], btr[dev_num], rx_probe[dev_num]);
+
+	/* fill net_device structure */
+
+	priv             = netdev_priv(dev);
+
+	dev->irq         = irq[dev_num];
+	dev->base_addr   = rbase[dev_num];
+
+	priv->speed      = speed[dev_num];
+	priv->btr        = btr[dev_num];
+	priv->rx_probe   = rx_probe[dev_num];
+	priv->clock      = clk;
+	priv->restart_ms = restart_ms;
+	priv->debug      = debug;
 
 	init_timer(&priv->timer);
 	priv->timer.expires = 0;
 
-	//	SET_MODULE_OWNER(dev);
+	if (register_netdev(dev)) {
+		printk(KERN_INFO "%s: register netdev failed\n", CHIP_NAME);
+		free_netdev(dev);
+		return NULL;
+	}
+
+	return dev;
 }
+
+int can_set_drv_name(void)
+{
+	char *hname = hal_name();
+
+	if (strlen(CHIP_NAME) + strlen(hname) >= DRV_NAME_LEN-1) {
+		printk(KERN_ERR "%s: driver name too long!\n", CHIP_NAME);
+		return -EINVAL;
+	}
+	sprintf(drv_name, "%s-%s", CHIP_NAME, hname);
+	return 0;
+}
+
+module_init(sja1000_init_module);
+module_exit(sja1000_exit_module);
+
