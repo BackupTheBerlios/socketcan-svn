@@ -173,7 +173,7 @@ static void chipset_init(struct net_device *dev, int wake);
 static void chipset_init_rx(struct net_device *dev);
 static void chipset_init_trx(struct net_device *dev);
 static void can_netdev_setup(struct net_device *dev);
-static struct net_device* can_create_netdev(int dev_num);
+static struct net_device* can_create_netdev(int dev_num, int hw_regs);
 static int  can_set_drv_name(void);
 int set_reset_mode(struct net_device *dev);
 static int sja1000_probe_chip(unsigned long base);
@@ -191,7 +191,7 @@ static __exit void sja1000_exit_module(void)
 			free_netdev(can_dev[i]);
 		}
 	}
-	sja1000_proc_remove(drv_name);
+	can_proc_remove(drv_name);
 
 	if ((ret = hal_exit()))
 		printk(KERN_INFO "%s: hal_exit error %d.\n", drv_name, ret);
@@ -247,12 +247,12 @@ static __init int sja1000_init_module(void)
 			return -ENODEV;
 		}
 
-		dev = can_create_netdev(i);
+		dev = can_create_netdev(i, SJA1000_IO_SIZE_BASIC);
 
 		if (dev != NULL) {
 			can_dev[i] = dev;
 			set_reset_mode(dev);
-			sja1000_proc_create(drv_name);
+			can_proc_create(drv_name);
 		} else {
 			can_dev[i] = NULL;
 			hw_detach(i);
@@ -1039,7 +1039,7 @@ void can_netdev_setup(struct net_device *dev)
 	SET_MODULE_OWNER(dev);
 }
 
-static struct net_device* can_create_netdev(int dev_num)
+static struct net_device* can_create_netdev(int dev_num, int hw_regs)
 {
 	struct net_device	*dev;
 	struct can_priv		*priv;
@@ -1066,6 +1066,7 @@ static struct net_device* can_create_netdev(int dev_num)
 	priv->btr        = btr[dev_num];
 	priv->rx_probe   = rx_probe[dev_num];
 	priv->clock      = clk;
+	priv->hw_regs    = hw_regs;
 	priv->restart_ms = restart_ms;
 	priv->debug      = debug;
 

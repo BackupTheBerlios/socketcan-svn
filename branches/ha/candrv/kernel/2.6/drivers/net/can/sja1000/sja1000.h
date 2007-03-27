@@ -166,6 +166,7 @@ struct can_priv {
 	struct can_device_stats	can_stats;
 	long			open_time;
 	int			clock;
+	int			hw_regs;
 	int			restart_ms;
 	int			debug;
 	int			speed;
@@ -183,7 +184,7 @@ struct can_priv {
 #define STATE_BUS_OFF		5
 #define STATE_RESET_MODE	6
 
-void sja1000_proc_create(const char *drv_name);
-void sja1000_proc_remove(const char *drv_name);
+void can_proc_create(const char *drv_name);
+void can_proc_remove(const char *drv_name);
 
 #endif /* SJA1000_H */
