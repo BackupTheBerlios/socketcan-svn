@@ -61,9 +61,9 @@ endif
 
 obj-m := sja1000-io.o sja1000-iomem.o sja1000-iomux.o sja1000-gw2.o
 
-sja1000-io-objs    := io.o    sja1000.o proc.o
-sja1000-iomem-objs := iomem.o sja1000.o proc.o
-sja1000-iomux-objs := iomux.o sja1000.o proc.o
-sja1000-gw2-objs   := gw2.o   sja1000.o proc.o
+sja1000-io-objs    := sja1000.o proc.o ../hal/io.o
+sja1000-iomem-objs := sja1000.o proc.o ../hal/iomem.o
+sja1000-iomux-objs := sja1000.o proc.o ../hal/iomux.o
+sja1000-gw2-objs   := sja1000.o proc.o ../hal/gw2.o
 
 endif
