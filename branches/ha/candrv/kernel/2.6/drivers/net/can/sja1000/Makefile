@@ -55,6 +55,7 @@ else
 
 ifneq ($(KBUILD_EXTMOD),)
 EXTRA_CFLAGS += -I$(KBUILD_EXTMOD)/../../../include \
+		-I$(KBUILD_EXTMOD)/hal \
 		-DETH_P_CAN=0x000C \
 		-DARPHRD_CAN=280
 endif
