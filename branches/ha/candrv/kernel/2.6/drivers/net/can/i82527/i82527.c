@@ -199,7 +199,7 @@ static __init int i82527_init_module(void)
 		hw_attach(i);
 		hw_reset_dev(i);
 
-		if (!i82527_probe_chip(base[i])) {
+		if (!i82527_probe_chip(rbase[i])) {
 			printk(KERN_ERR "%s: probably missing controller"
 			       " hardware\n", drv_name);
 			hal_release_region(i, I82527_IO_SIZE);
