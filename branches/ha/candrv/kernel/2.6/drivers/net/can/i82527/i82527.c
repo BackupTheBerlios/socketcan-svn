@@ -110,6 +110,9 @@ static int speed_n;
 static int btr_n;
 static int rx_probe_n;
 
+static u8 dsc = 0; /* devide system clock */
+static u8 dmc = 0; /* devide memory clock */
+
 module_param_array(base, int, &base_n, 0);
 module_param_array(irq, int, &irq_n, 0);
 module_param_array(speed, int, &speed_n, 0);
@@ -186,6 +189,7 @@ static __init int i82527_init_module(void)
 	}
 		
 	for (i = 0; base[i]; i++) {
+
 		printk(KERN_DEBUG "%s: checking for %s on address 0x%lX ...\n",
 		       drv_name, CHIP_NAME, base[i]);
 
@@ -198,6 +202,22 @@ static __init int i82527_init_module(void)
 
 		hw_attach(i);
 		hw_reset_dev(i);
+
+		/* to ensure the proper access to the i82527 registers */
+		/* the timing dependend settings have to be done first */
+		if (clk > 10000000)
+			dsc = iCPU_DSC; /* devide system clock */
+
+		if (clk == 10000000)
+			dmc = iCPU_DMC; /* devide memory clock */
+
+		// Enable configuration, put chip in bus-off, disable ints
+		CANout(rbase[i], controlReg, iCTL_CCE | iCTL_INI);
+		// Set clock out slew rates
+		CANout(rbase[i], clkOutReg,
+		       (iCLK_SL1 | iCLK_SL0 | iCLK_CD1 | iCLK_CD0));
+		// Configure cpu interface
+		CANout(rbase[i], cpuInterfaceReg,(dsc | dmc | iCPU_CEN));
 
 		if (!i82527_probe_chip(rbase[i])) {
 			printk(KERN_ERR "%s: probably missing controller"
@@ -286,10 +306,10 @@ static void set_baud(struct net_device *dev, int baud, int clock)
 
 	int SAM = (baud > 100000 ? 0 : 1);
 
-	if (clock > 10000000)
-		clock >>= 1; /* auto devide system clock */
+	if (dsc) /* devide system clock */
+		clock >>= 1; /* calculate BTR with this value */
 
-	clock >>= 1;
+	clock >>= 1; /* ???? */
 
 	for (tseg = (0 + 0 + 2) * 2;
 	     tseg <= (MAX_TSEG2 + MAX_TSEG1 + 2) * 2 + 1;
@@ -409,10 +429,7 @@ int set_reset_mode(struct net_device *dev)
 	unsigned long base = dev->base_addr;
 
 	// Configure cpu interface
-	if (priv->clock > 10000000) /* auto devide system clock */
-		CANout(base, cpuInterfaceReg,(iCPU_DMC | iCPU_CEN | iCPU_DSC));
-	else
-		CANout(base, cpuInterfaceReg,(iCPU_DMC | iCPU_CEN));
+	CANout(base, cpuInterfaceReg,(dsc | dmc | iCPU_CEN));
 
 	// Enable configuration and puts chip in bus-off, disable interrupts
 	CANout(base, controlReg, iCTL_CCE | iCTL_INI);
@@ -484,6 +501,8 @@ int i82527_clear_msg_objects(unsigned long base)
     int data;
 
     for (i = 1; i <= 15; i++) {
+	    CANout(base, msgArr[i].messageReg.msgCtrl0Reg,
+		   INTPD_UNC | RXIE_RES | TXIE_RES | MVAL_RES);
 	    CANout(base, msgArr[i].messageReg.msgCtrl0Reg,
 		   INTPD_RES | RXIE_RES | TXIE_RES | MVAL_RES);
 	    CANout(base, msgArr[i].messageReg.msgCtrl1Reg,
