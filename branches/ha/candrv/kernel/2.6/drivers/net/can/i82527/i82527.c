@@ -98,6 +98,7 @@ unsigned int  irq[MAXDEV]	= { 0 };
 
 unsigned int speed[MAXDEV]	= { 0 };
 unsigned int btr[MAXDEV]	= { 0 };
+unsigned int cdv[MAXDEV]	= { 0 }; /* CLKOUT clock divider */
 
 static int rx_probe[MAXDEV]	= { 0 };
 static int clk			= DEFAULT_HW_CLK;
@@ -108,6 +109,7 @@ static int base_n;
 static int irq_n;
 static int speed_n;
 static int btr_n;
+static int cdv_n;
 static int rx_probe_n;
 
 static u8 dsc = 0; /* devide system clock */
@@ -117,6 +119,7 @@ module_param_array(base, int, &base_n, 0);
 module_param_array(irq, int, &irq_n, 0);
 module_param_array(speed, int, &speed_n, 0);
 module_param_array(btr, int, &btr_n, 0);
+module_param_array(cdv, int, &cdv_n, 0);
 module_param_array(rx_probe, int, &rx_probe_n, 0);
 
 module_param(clk, int, 0);
@@ -188,7 +191,16 @@ static __init int i82527_init_module(void)
 		hal_use_defaults();
 	}
 		
+	/* to ensure the proper access to the i82527 registers */
+	/* the timing dependend settings have to be done first */
+	if (clk > 10000000)
+		dsc = iCPU_DSC; /* devide system clock => MCLK is 8MHz save */
+	else if (clk > 8000000) /* 8MHz < clk <= 10MHz */
+		dmc = iCPU_DMC; /* devide memory clock */
+
 	for (i = 0; base[i]; i++) {
+		int clkout;
+		u8 clockdiv;
 
 		printk(KERN_DEBUG "%s: checking for %s on address 0x%lX ...\n",
 		       drv_name, CHIP_NAME, base[i]);
@@ -203,19 +215,29 @@ static __init int i82527_init_module(void)
 		hw_attach(i);
 		hw_reset_dev(i);
 
-		/* to ensure the proper access to the i82527 registers */
-		/* the timing dependend settings have to be done first */
-		if (clk > 10000000)
-			dsc = iCPU_DSC; /* devide system clock */
-
-		if (clk == 10000000)
-			dmc = iCPU_DMC; /* devide memory clock */
-
 		// Enable configuration, put chip in bus-off, disable ints
 		CANout(rbase[i], controlReg, iCTL_CCE | iCTL_INI);
-		// Set clock out slew rates
-		CANout(rbase[i], clkOutReg,
-		       (iCLK_SL1 | iCLK_SL0 | iCLK_CD1 | iCLK_CD0));
+
+		/* CLKOUT devider and slew rate calculation */
+		if ((cdv[i] < 0) || (cdv[i] > 14)) {
+			printk(KERN_WARNING "%s: adjusted cdv[%d]=%d to 0.\n",
+			       drv_name, i, cdv[i]);
+			cdv[i] = 0;
+		}
+
+		clkout = clk / (cdv[i] + 1); /* CLKOUT frequency */
+		clockdiv = (u8)cdv[i]; /* devider value (see i82527 spec) */
+
+		if (clkout <= 16000000) {
+			clockdiv |= iCLK_SL1;
+			if (clkout <= 8000000)
+				clockdiv |= iCLK_SL0;
+		} else if (clkout <= 24000000)
+				clockdiv |= iCLK_SL0;
+
+		// Set CLKOUT devider and slew rates
+		CANout(rbase[i], clkOutReg, clockdiv);
+
 		// Configure cpu interface
 		CANout(rbase[i], cpuInterfaceReg,(dsc | dmc | iCPU_CEN));
 
