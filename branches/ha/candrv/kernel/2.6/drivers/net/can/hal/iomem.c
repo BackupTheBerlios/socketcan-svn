@@ -65,11 +65,12 @@ void hal_use_defaults(void)
 {
 	extern unsigned long base[];
 	extern unsigned int  irq[];
-	extern unsigned int  speed[];
 
-	base[0]		= 0xda000UL;
-	irq[0]		= 9;
-	speed[0]	= 500;
+	base[0]		= 0xd8000UL;
+	irq[0]		= 5;
+
+	base[1]		= 0xd8100UL;
+	irq[1]		= 15;
 }
 
 /* request controller register access space */
@@ -121,7 +122,7 @@ u8 hw_readreg(unsigned long base, int reg) {
 	static u8 val;
 	void __iomem *addr = (void __iomem *)base + reg;
 
-	val = (u8)readw(addr);
+	val = (u8)readb(addr);
 	rmb();
 
         return val;
@@ -132,7 +133,7 @@ void hw_writereg(unsigned long base, int reg, u8 val) {
 
 	void __iomem *addr = (void __iomem *)base + reg;
 
-	writew(val, addr);
+	writeb(val, addr);
 	wmb();
 }
 

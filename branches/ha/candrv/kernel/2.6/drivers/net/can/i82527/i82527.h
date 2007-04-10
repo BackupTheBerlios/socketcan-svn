@@ -62,7 +62,8 @@
 #define PROCBASE          "driver" /* /proc/ ... */
 
 #define DEFAULT_HW_CLK	16000000
-#define DEFAULT_SPEED	100 /* kBit/s */
+#define DEFAULT_SPEED	500 /* kBit/s */
+#define DEFAULT_FORCE_DMC 0 /* for critical register access, e.g. ser1274 */
 
 #define CAN_NETDEV_NAME	"can%d"
 
@@ -73,7 +74,7 @@
 /* bus timing */
 #define MAX_TSEG1	15
 #define MAX_TSEG2	 7
-#define SAMPLE_POINT	75
+#define SAMPLE_POINT	62
 #define JUMPWIDTH     0x40
 
 typedef struct canmessage {

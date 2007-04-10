@@ -85,8 +85,8 @@ MODULE_DESCRIPTION("LLCF/socketcan '" CHIP_NAME "' network device driver");
 char drv_name[DRV_NAME_LEN] = "undefined";
 
 /* driver and version information */
-static const char *drv_version	= "0.0.1";
-static const char *drv_reldate	= "2007-03-27";
+static const char *drv_version	= "0.0.2";
+static const char *drv_reldate	= "2007-05-10";
 
 /* array of all can chips */
 struct net_device *can_dev[MAXDEV];
@@ -96,13 +96,14 @@ unsigned long base[MAXDEV]	= { 0 }; /* hardware address */
 unsigned long rbase[MAXDEV]	= { 0 }; /* (remapped) device address */
 unsigned int  irq[MAXDEV]	= { 0 };
 
-unsigned int speed[MAXDEV]	= { 0 };
+unsigned int speed[MAXDEV]	= { DEFAULT_SPEED, DEFAULT_SPEED };
 unsigned int btr[MAXDEV]	= { 0 };
 unsigned int bcr[MAXDEV]	= { 0 }; /* bus configuration register */
 unsigned int cdv[MAXDEV]	= { 0 }; /* CLKOUT clock divider */
 
 static int rx_probe[MAXDEV]	= { 0 };
 static int clk			= DEFAULT_HW_CLK;
+static int force_dmc		= DEFAULT_FORCE_DMC;
 static int debug		= 0;
 static int restart_ms		= 100;
 
@@ -126,6 +127,7 @@ module_param_array(cdv, int, &cdv_n, 0);
 module_param_array(rx_probe, int, &rx_probe_n, 0);
 
 module_param(clk, int, 0);
+module_param(force_dmc, int, 0);
 module_param(debug, int, 0);
 module_param(restart_ms, int, 0);
 
@@ -201,6 +203,10 @@ static __init int i82527_init_module(void)
 	else if (clk > 8000000) /* 8MHz < clk <= 10MHz */
 		dmc = iCPU_DMC; /* devide memory clock */
 
+	/* devide memory clock even if it's not needed (regarding the spec) */
+	if (force_dmc)
+		dmc = iCPU_DMC;
+
 	for (i = 0; base[i]; i++) {
 		int clkout;
 		u8 clockdiv;
@@ -220,6 +226,17 @@ static __init int i82527_init_module(void)
 
 		// Enable configuration, put chip in bus-off, disable ints
 		CANout(rbase[i], controlReg, iCTL_CCE | iCTL_INI);
+
+		// Configure cpu interface / CLKOUT disable
+		CANout(rbase[i], cpuInterfaceReg,(dsc | dmc));
+
+		if (!i82527_probe_chip(rbase[i])) {
+			printk(KERN_ERR "%s: probably missing controller"
+			       " hardware\n", drv_name);
+			hal_release_region(i, I82527_IO_SIZE);
+			i82527_exit_module();
+			return -ENODEV;
+		}
 
 		/* CLKOUT devider and slew rate calculation */
 		if ((cdv[i] < 0) || (cdv[i] > 14)) {
@@ -241,18 +258,10 @@ static __init int i82527_init_module(void)
 		// Set CLKOUT devider and slew rates
 		CANout(rbase[i], clkOutReg, clockdiv);
 
-		// Configure cpu interface
+		// Configure cpu interface / CLKOUT enable
 		CANout(rbase[i], cpuInterfaceReg,(dsc | dmc | iCPU_CEN));
 
 		CANout(rbase[i], busConfigReg, bcr[i]);
-
-		if (!i82527_probe_chip(rbase[i])) {
-			printk(KERN_ERR "%s: probably missing controller"
-			       " hardware\n", drv_name);
-			hal_release_region(i, I82527_IO_SIZE);
-			i82527_exit_module();
-			return -ENODEV;
-		}
 
 		dev = can_create_netdev(i, I82527_IO_SIZE);
 
@@ -336,8 +345,6 @@ static void set_baud(struct net_device *dev, int baud, int clock)
 	if (dsc) /* devide system clock */
 		clock >>= 1; /* calculate BTR with this value */
 
-	clock >>= 1; /* ???? */
-
 	for (tseg = (0 + 0 + 2) * 2;
 	     tseg <= (MAX_TSEG2 + MAX_TSEG1 + 2) * 2 + 1;
 	     tseg++) {
@@ -397,7 +404,8 @@ static void set_baud(struct net_device *dev, int baud, int clock)
  * If the highest bit of mask or code is set OR the value is bigger than
  * 0x7FF (11 bit), an extended mask is assumed.
  */
-int i82527_set_mask(struct net_device *dev, unsigned int code, unsigned int mask)
+int i82527_set_mask(struct net_device *dev,
+		    unsigned int code, unsigned int mask)
 {
 	struct can_priv *priv = netdev_priv(dev);
 	unsigned long base = dev->base_addr;
@@ -579,7 +587,7 @@ static void chipset_init_regs(struct net_device *dev)
 	CANout(base, globalMaskExtendedReg[2], 0);
 	CANout(base, globalMaskExtendedReg[3], 0);
 	// Set message 15 mask, we are not using it, only standard mask is used
-	// We set all bits to one because this mask is anded with the global mask.
+	// We set all bits to one because this mask is anded w. the global mask
 	CANout(base, message15MaskReg[0], 0xFF);
 	CANout(base, message15MaskReg[1], 0xFF);
 	CANout(base, message15MaskReg[2], 0xFF);
@@ -686,7 +694,8 @@ static int can_start_xmit(struct sk_buff *skb, struct net_device *dev)
 	int	i;
 
 	if ((CANin(base, message1Reg.msgCtrl1Reg) & TXRQ_UNC) == TXRQ_SET) {
-		printk(KERN_ERR "%s: %s: TX register is occupied!\n", dev->name, drv_name);
+		printk(KERN_ERR "%s: %s: TX register is occupied!\n",
+		       dev->name, drv_name);
 		return 0;
 	}
 
@@ -731,7 +740,8 @@ static int can_start_xmit(struct sk_buff *skb, struct net_device *dev)
 	CANout(base, message1Reg.msgCtrl1Reg,
 	       (RMPD_RES | TXRQ_SET | CPUU_RES | NEWD_UNC));
 
-	// HM: We had some cases of repeated IRQs, so make sure the INT is acknowledged
+	// HM: We had some cases of repeated IRQs
+	// so make sure the INT is acknowledged
 	// I know it's already further up, but doing again fixed the issue
 	CANout(base, message1Reg.msgCtrl0Reg,
 	       (MVAL_UNC | TXIE_UNC | RXIE_UNC | INTPD_RES));
@@ -989,7 +999,9 @@ static irqreturn_t can_interrupt(int irq, void *dev_id)
 				priv->can_stats.bus_error++;
 
 				// Clear init flag and reenable interrupts
-				flags = CANin(base, controlReg) | ( iCTL_IE | iCTL_EIE );
+				flags = CANin(base, controlReg) |
+					( iCTL_IE | iCTL_EIE );
+
 				flags &= ~iCTL_INI; // Reset init flag
 				CANout(base, controlReg, flags);
 			}
@@ -1005,7 +1017,8 @@ static irqreturn_t can_interrupt(int irq, void *dev_id)
 					priv->can_stats.data_overrun++;
 
 				can_rx(dev);
-				ctl1reg = CANin(base, message15Reg.msgCtrl1Reg);
+				ctl1reg = CANin(base,
+						message15Reg.msgCtrl1Reg);
 			}
 
 			if (priv->state == STATE_PROBE) {
@@ -1022,7 +1035,8 @@ static irqreturn_t can_interrupt(int irq, void *dev_id)
 			// Nothing more to send, switch off interrupts
 			CANout(base, message1Reg.msgCtrl0Reg,
 			       (MVAL_RES | TXIE_RES | RXIE_RES | INTPD_RES));
-			// We had some cases of repeated IRQ, so make sure the INT is acknowledged
+			// We had some cases of repeated IRQ
+			// so make sure the INT is acknowledged
 			CANout(base, message1Reg.msgCtrl0Reg,
 			       (MVAL_UNC | TXIE_UNC | RXIE_UNC | INTPD_RES));
 
