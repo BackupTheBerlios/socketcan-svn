@@ -98,6 +98,7 @@ unsigned int  irq[MAXDEV]	= { 0 };
 
 unsigned int speed[MAXDEV]	= { 0 };
 unsigned int btr[MAXDEV]	= { 0 };
+unsigned int bcr[MAXDEV]	= { 0 }; /* bus configuration register */
 unsigned int cdv[MAXDEV]	= { 0 }; /* CLKOUT clock divider */
 
 static int rx_probe[MAXDEV]	= { 0 };
@@ -109,6 +110,7 @@ static int base_n;
 static int irq_n;
 static int speed_n;
 static int btr_n;
+static int bcr_n;
 static int cdv_n;
 static int rx_probe_n;
 
@@ -119,6 +121,7 @@ module_param_array(base, int, &base_n, 0);
 module_param_array(irq, int, &irq_n, 0);
 module_param_array(speed, int, &speed_n, 0);
 module_param_array(btr, int, &btr_n, 0);
+module_param_array(bcr, int, &bcr_n, 0);
 module_param_array(cdv, int, &cdv_n, 0);
 module_param_array(rx_probe, int, &rx_probe_n, 0);
 
@@ -240,6 +243,8 @@ static __init int i82527_init_module(void)
 
 		// Configure cpu interface
 		CANout(rbase[i], cpuInterfaceReg,(dsc | dmc | iCPU_CEN));
+
+		CANout(rbase[i], busConfigReg, bcr[i]);
 
 		if (!i82527_probe_chip(rbase[i])) {
 			printk(KERN_ERR "%s: probably missing controller"
@@ -555,11 +560,9 @@ static void chipset_init_regs(struct net_device *dev)
 	// Enable configuration and puts chip in bus-off, disable interrupts
 	CANout(base, controlReg, (iCTL_CCE | iCTL_INI));
 
-	// Set clock out slew rates
-	CANout(base, clkOutReg, (iCLK_SL1 | iCLK_CD1));
+	// Set CLKOUT devider and slew rates is was done in i82527_init_module
 
-	// Bus configuration
-	CANout(base, busConfigReg, (iBUS_CBY));
+	// Bus configuration was done in i82527_init_module
 
 	// Clear interrupts
 	CANin(base, interruptReg);
