@@ -85,8 +85,13 @@ MODULE_DESCRIPTION("LLCF/socketcan '" CHIP_NAME "' network device driver");
 char drv_name[DRV_NAME_LEN] = "undefined";
 
 /* driver and version information */
-static const char *drv_version	= "0.0.2";
-static const char *drv_reldate	= "2007-05-10";
+static const char *drv_version	= "0.0.3";
+static const char *drv_reldate	= "2007-04-11";
+
+static const canid_t rxobjflags[] = {0, CAN_EFF_FLAG,
+				     CAN_RTR_FLAG, CAN_RTR_FLAG | CAN_EFF_FLAG,
+				     0, CAN_EFF_FLAG}; 
+#define RXOBJBASE 10
 
 /* array of all can chips */
 struct net_device *can_dev[MAXDEV];
@@ -100,6 +105,7 @@ unsigned int speed[MAXDEV]	= { DEFAULT_SPEED, DEFAULT_SPEED };
 unsigned int btr[MAXDEV]	= { 0 };
 unsigned int bcr[MAXDEV]	= { 0 }; /* bus configuration register */
 unsigned int cdv[MAXDEV]	= { 0 }; /* CLKOUT clock divider */
+unsigned int mo15[MAXDEV]	= { MO15_DEFLT, MO15_DEFLT }; /* msg obj 15 */
 
 static int rx_probe[MAXDEV]	= { 0 };
 static int clk			= DEFAULT_HW_CLK;
@@ -113,6 +119,7 @@ static int speed_n;
 static int btr_n;
 static int bcr_n;
 static int cdv_n;
+static int mo15_n;
 static int rx_probe_n;
 
 static u8 dsc = 0; /* devide system clock */
@@ -124,6 +131,7 @@ module_param_array(speed, int, &speed_n, 0);
 module_param_array(btr, int, &btr_n, 0);
 module_param_array(bcr, int, &bcr_n, 0);
 module_param_array(cdv, int, &cdv_n, 0);
+module_param_array(mo15, int, &mo15_n, 0);
 module_param_array(rx_probe, int, &rx_probe_n, 0);
 
 module_param(clk, int, 0);
@@ -390,72 +398,48 @@ static void set_baud(struct net_device *dev, int baud, int clock)
 //	set_btr(dev, best_brp | JUMPWIDTH, (SAM << 7) | (tseg2 << 4) | tseg1);
 }
 
-/*
- * This is currently an attempt to support acceptance code and mask
- * for i82527. However the interpretation of mask and code is currently
- * different to the SJA1000 function.
- *
- * This MUST change in the future to have a common exchangable API for
- * both chips.
- *
- * Currently if code and mask are both 0 OR both 0xFFFFFFFF the
- * acceptance filtering is disabled.
- *
- * If the highest bit of mask or code is set OR the value is bigger than
- * 0x7FF (11 bit), an extended mask is assumed.
- */
-int i82527_set_mask(struct net_device *dev,
-		    unsigned int code, unsigned int mask)
+static inline int obj2rxo(int obj)
 {
-	struct can_priv *priv = netdev_priv(dev);
-	unsigned long base = dev->base_addr;
-
-	// 0xfffff is a magic value and means no mask set.
-	// We have to change this to 0 to make this work with i82527, here 0
-	// means don't care.
-	if (code == 0xffffffff)
-		code = 0;
-	if (mask == 0xffffffff)
-		mask = 0;
-
-	// Extended (29-bit) or basic (11-bit) mask?
-	if (((code & 0x8000000) == 0x8000000) ||
-	    ((mask & 0x8000000) == 0x8000000) ||
-	    (code > 0x7FF) ||
-	    (mask > 0x7FF))
-	{
-		CANout(base, globalMaskExtendedReg[0], (mask >> 21) & 0xFFU);
-		CANout(base, globalMaskExtendedReg[1], (mask >> 13) & 0xFFU);
-		CANout(base, globalMaskExtendedReg[2], (mask >> 5) & 0xFFU);
-		CANout(base, globalMaskExtendedReg[3], (mask << 3) & 0xFFU);
-		CANout(base, message15Reg.idReg[0], (code >> 21) & 0xFFU);
-		CANout(base, message15Reg.idReg[1], (code >> 13) & 0xFFU);
-		CANout(base, message15Reg.idReg[2], (code >> 5) & 0xFFU);
-		CANout(base, message15Reg.idReg[3], (code << 3) & 0xFFU);
-		CANout(base, message15Reg.messageConfigReg, MCFG_XTD);
-
-		DBG(KERN_INFO "%s: %s: EFF mask %X\n",
-		    dev->name, __FUNCTION__, mask);
-
-		DBG(KERN_INFO "%s: %s: EFF code %X\n",
-		    dev->name, __FUNCTION__, code);
-	}
+	/* obj4 = obj15 SFF, obj5 = obj15 EFF */ 
+	if (obj < 4)
+		return RXOBJBASE + obj;
 	else
-	{
-		CANout(base, globalMaskStandardReg[0], (mask >> 3) & 0xFFU);
-		CANout(base, globalMaskStandardReg[1], (mask << 5) & 0xFFU);
-		CANout(base, message15Reg.idReg[0], (code >> 3) & 0xFFU);
-		CANout(base, message15Reg.idReg[1], (code << 5) & 0xFFU);
-		CANout(base, message15Reg.messageConfigReg, 0x00);
+		return 15;
+}
 
-		DBG(KERN_INFO "%s: %s: SFF mask %X\n",
-		    dev->name, __FUNCTION__, mask);
+void enable_rx_obj(unsigned long base, int obj)
+{
+	u8 mcfg = 0;
+	int rxo = obj2rxo(obj);
 
-		DBG(KERN_INFO "%s: %s: SFF code %X\n",
-		    dev->name, __FUNCTION__, code);
+	// Configure message object for receiption
+	if (rxobjflags[obj] & CAN_EFF_FLAG)
+		mcfg = MCFG_XTD;
+
+	if (rxobjflags[obj] & CAN_RTR_FLAG) {
+		CANout(base, msgArr[rxo].messageReg.messageConfigReg,
+		       mcfg | MCFG_DIR);
+		CANout(base, msgArr[rxo].messageReg.msgCtrl0Reg,
+		       MVAL_SET | TXIE_RES | RXIE_SET | INTPD_RES);
+		CANout(base, msgArr[rxo].messageReg.msgCtrl1Reg,
+		       NEWD_RES | CPUU_SET | TXRQ_RES | RMPD_RES);
+	} else {
+		CANout(base, msgArr[rxo].messageReg.messageConfigReg, mcfg);
+		CANout(base, msgArr[rxo].messageReg.msgCtrl0Reg,
+		       MVAL_SET | TXIE_RES | RXIE_SET | INTPD_RES);
+		CANout(base, msgArr[rxo].messageReg.msgCtrl1Reg,
+		       NEWD_RES | MLST_RES | TXRQ_RES | RMPD_RES);
 	}
+}
 
-	return 0;
+void disable_rx_obj(unsigned long base, int obj)
+{
+	int rxo = obj2rxo(obj);
+
+	CANout(base, msgArr[rxo].messageReg.msgCtrl1Reg,
+	       NEWD_RES | MLST_RES | TXRQ_RES | RMPD_RES);
+	CANout(base, msgArr[rxo].messageReg.msgCtrl0Reg,
+	       MVAL_RES | TXIE_RES | RXIE_RES | INTPD_RES);
 }
 
 int set_reset_mode(struct net_device *dev)
@@ -475,11 +459,19 @@ int set_reset_mode(struct net_device *dev)
 	// Clear status register
 	CANout(base, statusReg, 0);
 
-	// Clear message object for receiption
-	CANout(base, message15Reg.msgCtrl1Reg,
-	       NEWD_RES | MLST_RES | TXRQ_RES | RMPD_RES);
-	CANout(base, message15Reg.msgCtrl0Reg,
-	       MVAL_RES | TXIE_RES | RXIE_RES | INTPD_RES);
+	// Clear message objects for receiption
+	if (priv->mo15 == MO15_SFF)
+		disable_rx_obj(base, 4); /* rx via obj15 SFF */
+	else
+		disable_rx_obj(base, 0); /* rx via obj10 SFF */
+
+	if (priv->mo15 == MO15_EFF)
+		disable_rx_obj(base, 5); /* rx via obj15 EFF */
+	else
+		disable_rx_obj(base, 1); /* rx via obj11 EFF */
+
+	disable_rx_obj(base, 2);
+	disable_rx_obj(base, 3);
 
 	// Clear message object for send
 	CANout(base, message1Reg.msgCtrl1Reg,
@@ -487,7 +479,7 @@ int set_reset_mode(struct net_device *dev)
 	CANout(base, message1Reg.msgCtrl0Reg,
 	       MVAL_RES | TXIE_RES | RXIE_RES | INTPD_RES);
 
-	DBG(KERN_INFO "%s: %s: CAN_CON 0x%x CAN_CPU 0x%x\n",
+	DBG(KERN_INFO "%s: %s: CtrlReg 0x%x CPU_ireg 0x%x\n",
 	    dev->name, __FUNCTION__,
 	    CANin(base, controlReg), CANin(base, cpuInterfaceReg));
 
@@ -496,6 +488,7 @@ int set_reset_mode(struct net_device *dev)
 
 static int set_normal_mode(struct net_device *dev)
 {
+	struct can_priv *priv = netdev_priv(dev);
 	unsigned long base = dev->base_addr;
 
 	// Clear interrupts
@@ -504,13 +497,19 @@ static int set_normal_mode(struct net_device *dev)
 	// Clear status register
 	CANout(base, statusReg, 0);
 
-	// Configure message object for receiption
-	CANout(base, message15Reg.msgCtrl1Reg,
-	       NEWD_RES | MLST_RES | TXRQ_RES | RMPD_RES);
-	CANout(base, message15Reg.msgCtrl0Reg,
-	       MVAL_SET | TXIE_RES | RXIE_SET | INTPD_RES);
+	// Configure message objects for receiption
+	if (priv->mo15 == MO15_SFF)
+		enable_rx_obj(base, 4); /* rx via obj15 SFF */
+	else
+		enable_rx_obj(base, 0); /* rx via obj10 SFF */
 
-	i82527_set_mask(dev, 0, 0); /* no filter */
+	if (priv->mo15 == MO15_EFF)
+		enable_rx_obj(base, 5); /* rx via obj15 EFF */
+	else
+		enable_rx_obj(base, 1); /* rx via obj11 EFF */
+
+	enable_rx_obj(base, 2);
+	enable_rx_obj(base, 3);
 
 	// Clear message object for send
 	CANout(base, message1Reg.msgCtrl1Reg,
@@ -580,20 +579,15 @@ static void chipset_init_regs(struct net_device *dev)
 
 	i82527_clear_msg_objects(base);
 
+	// Set all global ID masks to "don't care"
 	CANout(base, globalMaskStandardReg[0], 0);	
 	CANout(base, globalMaskStandardReg[1], 0);
 	CANout(base, globalMaskExtendedReg[0], 0);
 	CANout(base, globalMaskExtendedReg[1], 0);
 	CANout(base, globalMaskExtendedReg[2], 0);
 	CANout(base, globalMaskExtendedReg[3], 0);
-	// Set message 15 mask, we are not using it, only standard mask is used
-	// We set all bits to one because this mask is anded w. the global mask
-	CANout(base, message15MaskReg[0], 0xFF);
-	CANout(base, message15MaskReg[1], 0xFF);
-	CANout(base, message15MaskReg[2], 0xFF);
-	CANout(base, message15MaskReg[3], 0xFF);
 
-	DBG(KERN_INFO "%s: %s: CAN_CON 0x%x CAN_CPU 0x%x\n",
+	DBG(KERN_INFO "%s: %s: CtrlReg 0x%x CPU_ireg 0x%x\n",
 	    dev->name, __FUNCTION__,
 	    CANin(base, controlReg), CANin(base, cpuInterfaceReg));
 
@@ -646,7 +640,7 @@ static void chipset_init_rx(struct net_device *dev)
 	// Clear bus-off, Interrupts only for errors, not for status change
 	CANout(base, controlReg, iCTL_IE | iCTL_EIE);
 
-	DBG(KERN_INFO "%s: %s: CAN_CON 0x%x CAN_CPU 0x%x\n",
+	DBG(KERN_INFO "%s: %s: CtrlReg 0x%x CPU_ireg 0x%x\n",
 	    dev->name, __FUNCTION__,
 	    CANin(base, controlReg), CANin(base, cpuInterfaceReg));
 }
@@ -672,7 +666,7 @@ static void chipset_init_trx(struct net_device *dev)
 	// Clear bus-off, Interrupts only for errors, not for status change
 	CANout(base, controlReg, iCTL_IE | iCTL_EIE);
 
-	DBG(KERN_INFO "%s: %s: CAN_CON 0x%x CAN_CPU 0x%x\n",
+	DBG(KERN_INFO "%s: %s: CtrlReg 0x%x CPU_ireg 0x%x\n",
 	    dev->name, __FUNCTION__,
 	    CANin(base, controlReg), CANin(base, cpuInterfaceReg));
 }
@@ -836,11 +830,8 @@ static void can_restart_now(struct net_device *dev)
 /*
  * Subroutine of ISR for RX interrupts.
  *
- * Note: This code depends on using message object 15 for receiving.
- * Object 15 has a double buffer and using this routine would not work
- * reliably on other message objects!
  */
-static void can_rx(struct net_device *dev)
+static void can_rx(struct net_device *dev, int obj)
 {
 	struct can_priv *priv	= netdev_priv(dev);
 	unsigned long base	= dev->base_addr;
@@ -851,6 +842,7 @@ static void can_rx(struct net_device *dev)
 	canid_t	id;
 	uint8_t	dlc;
 	int	i;
+	int	rxo = obj2rxo(obj);
 
 	skb = dev_alloc_skb(sizeof(struct can_frame));
 	if (skb == NULL) {
@@ -859,19 +851,19 @@ static void can_rx(struct net_device *dev)
 	skb->dev = dev;
 	skb->protocol = htons(ETH_P_CAN);
 
-	ctl1reg = CANin(base, message15Reg.msgCtrl1Reg);
-	msgctlreg = CANin(base, message15Reg.messageConfigReg);
+	ctl1reg = CANin(base, msgArr[rxo].messageReg.msgCtrl1Reg);
+	msgctlreg = CANin(base, msgArr[rxo].messageReg.messageConfigReg);
 
 	if( msgctlreg & MCFG_XTD ) {
-		id = CANin(base, message15Reg.idReg[3])
-			| (CANin(base, message15Reg.idReg[2]) << 8)
-			| (CANin(base, message15Reg.idReg[1]) << 16)
-			| (CANin(base, message15Reg.idReg[0]) << 24);
+		id = CANin(base, msgArr[rxo].messageReg.idReg[3])
+			| (CANin(base, msgArr[rxo].messageReg.idReg[2]) << 8)
+			| (CANin(base, msgArr[rxo].messageReg.idReg[1]) << 16)
+			| (CANin(base, msgArr[rxo].messageReg.idReg[0]) << 24);
 		id >>= 3;
 		id |= CAN_EFF_FLAG;
 	} else {
-		id = CANin(base, message15Reg.idReg[1])
-			|(CANin(base, message15Reg.idReg[0]) << 8);
+		id = CANin(base, msgArr[rxo].messageReg.idReg[1])
+			|(CANin(base, msgArr[rxo].messageReg.idReg[0]) << 8);
 		id >>= 5;
 	}
 
@@ -888,14 +880,11 @@ static void can_rx(struct net_device *dev)
 	cf->can_id    = id;
 	cf->can_dlc   = dlc;
 	for (i = 0; i < dlc; i++) {
-		cf->data[i] = CANin(base, message15Reg.dataReg[i]);
+		cf->data[i] = CANin(base, msgArr[rxo].messageReg.dataReg[i]);
 	}
 
 	// Make the chip ready to receive the next message
-	CANout(base, message15Reg.msgCtrl0Reg,
-	       MVAL_SET | TXIE_RES | RXIE_SET | INTPD_RES);
-	CANout(base, message15Reg.msgCtrl1Reg,
-	       RMPD_RES | TXRQ_RES | MLST_RES | NEWD_RES);
+	enable_rx_obj(base, obj);
 
 	netif_rx(skb);
 
@@ -1008,17 +997,66 @@ static irqreturn_t can_interrupt(int irq, void *dev_id)
 		}
 		break;
 
-		case 2: // Receiption, message object 15
+		case 0x2: // Receiption, message object 15
 		{
 			uint8_t ctl1reg;
+
 			ctl1reg = CANin(base, message15Reg.msgCtrl1Reg);
 			while (ctl1reg & NEWD_SET) {
 				if (ctl1reg & MLST_SET)
 					priv->can_stats.data_overrun++;
 
-				can_rx(dev);
+				if (priv->mo15 == MO15_SFF)
+					can_rx(dev, 4); /* rx via obj15 SFF */
+				else
+					can_rx(dev, 5); /* rx via obj15 EFF */
+
+				ctl1reg = CANin(base, message15Reg.msgCtrl1Reg);
+			}
+
+			if (priv->state == STATE_PROBE) {
+				/* valid RX -> switch to trx-mode */
+				chipset_init_trx(dev); /* no tx queue wakeup */
+				break; /* check again after init controller */
+			}
+		}
+		break;
+
+		case 0xC: // Receiption, message object 10
+		case 0xD: // Receiption, message object 11
+		{
+			int obj = irqreg - 0xC;
+			int rxo = obj2rxo(obj);
+			uint8_t ctl1reg;
+			ctl1reg = CANin(base, msgArr[rxo].messageReg.msgCtrl1Reg);
+			while (ctl1reg & NEWD_SET) {
+				if (ctl1reg & MLST_SET)
+					priv->can_stats.data_overrun++;
+				CANout(base, msgArr[rxo].messageReg.msgCtrl1Reg,
+				       NEWD_RES | MLST_RES | TXRQ_UNC | RMPD_UNC);
+				can_rx(dev, obj);
 				ctl1reg = CANin(base,
-						message15Reg.msgCtrl1Reg);
+						msgArr[rxo].messageReg.msgCtrl1Reg);
+			}
+
+			if (priv->state == STATE_PROBE) {
+				/* valid RX -> switch to trx-mode */
+				chipset_init_trx(dev); /* no tx queue wakeup */
+				break; /* check again after init controller */
+			}
+		}
+		break;
+
+		case 0xE: // Receiption, message object 12 (RTR)
+		case 0xF: // Receiption, message object 13 (RTR)
+		{
+			int obj = irqreg - 0xC;
+			int rxo = obj2rxo(obj);
+			uint8_t ctl0reg;
+			ctl0reg = CANin(base, msgArr[rxo].messageReg.msgCtrl0Reg);
+			while (ctl0reg & INTPD_SET) {
+				can_rx(dev, obj);
+				ctl0reg = CANin(base, msgArr[rxo].messageReg.msgCtrl0Reg);
 			}
 
 			if (priv->state == STATE_PROBE) {
@@ -1167,6 +1205,8 @@ static struct net_device* can_create_netdev(int dev_num, int hw_regs)
 	struct net_device	*dev;
 	struct can_priv		*priv;
 
+	const char mo15mode [3][6] = {"none", "sff", "eff"};
+
 	if (!(dev = alloc_netdev(sizeof(struct can_priv), CAN_NETDEV_NAME,
 				 can_netdev_setup))) {
 		printk(KERN_ERR "%s: out of memory\n", CHIP_NAME);
@@ -1174,9 +1214,10 @@ static struct net_device* can_create_netdev(int dev_num, int hw_regs)
 	}
 
 	printk(KERN_INFO "%s: base 0x%lX / irq %d / speed %d / "
-	       "btr 0x%X / rx_probe %d\n",
+	       "btr 0x%X / rx_probe %d / mo15 %s\n",
 	       drv_name, rbase[dev_num], irq[dev_num],
-	       speed[dev_num], btr[dev_num], rx_probe[dev_num]);
+	       speed[dev_num], btr[dev_num], rx_probe[dev_num],
+	       mo15mode[mo15[dev_num]]);
 
 	/* fill net_device structure */
 
@@ -1188,6 +1229,7 @@ static struct net_device* can_create_netdev(int dev_num, int hw_regs)
 	priv->speed      = speed[dev_num];
 	priv->btr        = btr[dev_num];
 	priv->rx_probe   = rx_probe[dev_num];
+	priv->mo15       = mo15[dev_num];
 	priv->clock      = clk;
 	priv->hw_regs    = hw_regs;
 	priv->restart_ms = restart_ms;

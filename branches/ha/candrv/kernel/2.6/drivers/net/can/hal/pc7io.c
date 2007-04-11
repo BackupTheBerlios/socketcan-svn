@@ -65,11 +65,9 @@ void hal_use_defaults(void)
 {
 	extern unsigned long base[];
 	extern unsigned int  irq[];
-	extern unsigned int  speed[];
 
 	base[0]		= 0x1000UL;
 	irq[0]		= 9;
-	speed[0]	= 500;
 }
 
 /* request controller register access space */

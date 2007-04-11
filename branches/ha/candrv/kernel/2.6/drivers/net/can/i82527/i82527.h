@@ -65,6 +65,18 @@
 #define DEFAULT_SPEED	500 /* kBit/s */
 #define DEFAULT_FORCE_DMC 0 /* for critical register access, e.g. ser1274 */
 
+
+/* The message object 15 has a shadow register for reliable data receiption  */
+/* under heavy bus load. Therefore it makes sense to use this message object */
+/* (mo15) for the needed use case. The frame type (EFF/SFF) for the mo15 can */
+/* be defined on the module command line. The default is 11 bit SFF format.  */
+
+#define MO15_NONE 0
+#define MO15_SFF  1
+#define MO15_EFF  2
+
+#define MO15_DEFLT MO15_SFF /* the default */
+
 #define CAN_NETDEV_NAME	"can%d"
 
 #define TX_TIMEOUT      (50*HZ/1000) /* 50ms */ 
@@ -267,6 +279,7 @@ struct can_priv {
 	int			speed;
 	int			btr;
 	int			rx_probe;
+	int			mo15;
 	struct timer_list       timer;
 	int			state;
 };
