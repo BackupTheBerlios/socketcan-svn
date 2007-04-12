@@ -139,6 +139,19 @@ module_param(force_dmc, int, 0);
 module_param(debug, int, 0);
 module_param(restart_ms, int, 0);
 
+MODULE_PARM_DESC(base, "CAN controller base address");
+MODULE_PARM_DESC(irq, "CAN controller interrupt");
+MODULE_PARM_DESC(speed, "CAN bus bitrate");
+MODULE_PARM_DESC(btr, "Bit Timing Register value 0x<btr0><btr1>, e.g. 0x4014");
+MODULE_PARM_DESC(bcr, "i82527 bus configuration register value (default: 0)");
+MODULE_PARM_DESC(cdv, "clockout devider value (0-14) (default: 0)");
+MODULE_PARM_DESC(mo15, "rx message object 15 usage. 0:none 1:sff(default) 2:eff");
+MODULE_PARM_DESC(rx_probe, "switch to trx mode after correct msg receiption. (default off)");
+
+MODULE_PARM_DESC(clk, "CAN controller chip clock (default: 16MHz)");
+MODULE_PARM_DESC(force_dmc, "set i82527 DMC bit (default: calculate from clk)"); 
+MODULE_PARM_DESC(debug, "set debug mask (default: 0)");
+MODULE_PARM_DESC(restart_ms, "restart chip on heavy bus errors / bus off after x ms (default 100ms)");
 
 /* function declarations */
 
@@ -479,7 +492,7 @@ int set_reset_mode(struct net_device *dev)
 	CANout(base, message1Reg.msgCtrl0Reg,
 	       MVAL_RES | TXIE_RES | RXIE_RES | INTPD_RES);
 
-	DBG(KERN_INFO "%s: %s: CtrlReg 0x%x CPU_ireg 0x%x\n",
+	DBG(KERN_INFO "%s: %s: CtrlReg 0x%x CPUifReg 0x%x\n",
 	    dev->name, __FUNCTION__,
 	    CANin(base, controlReg), CANin(base, cpuInterfaceReg));
 
@@ -498,14 +511,18 @@ static int set_normal_mode(struct net_device *dev)
 	CANout(base, statusReg, 0);
 
 	// Configure message objects for receiption
-	if (priv->mo15 == MO15_SFF)
+	if (priv->mo15 == MO15_SFF) {
 		enable_rx_obj(base, 4); /* rx via obj15 SFF */
-	else
+		printk(KERN_INFO "%s: using msg object 15 for SFF receiption.\n",
+		       dev->name);
+	} else
 		enable_rx_obj(base, 0); /* rx via obj10 SFF */
 
-	if (priv->mo15 == MO15_EFF)
+	if (priv->mo15 == MO15_EFF) {
 		enable_rx_obj(base, 5); /* rx via obj15 EFF */
-	else
+		printk(KERN_INFO "%s: using msg object 15 for EFF receiption.\n",
+		       dev->name);
+	} else
 		enable_rx_obj(base, 1); /* rx via obj11 EFF */
 
 	enable_rx_obj(base, 2);
@@ -587,7 +604,7 @@ static void chipset_init_regs(struct net_device *dev)
 	CANout(base, globalMaskExtendedReg[2], 0);
 	CANout(base, globalMaskExtendedReg[3], 0);
 
-	DBG(KERN_INFO "%s: %s: CtrlReg 0x%x CPU_ireg 0x%x\n",
+	DBG(KERN_INFO "%s: %s: CtrlReg 0x%x CPUifReg 0x%x\n",
 	    dev->name, __FUNCTION__,
 	    CANin(base, controlReg), CANin(base, cpuInterfaceReg));
 
@@ -640,7 +657,7 @@ static void chipset_init_rx(struct net_device *dev)
 	// Clear bus-off, Interrupts only for errors, not for status change
 	CANout(base, controlReg, iCTL_IE | iCTL_EIE);
 
-	DBG(KERN_INFO "%s: %s: CtrlReg 0x%x CPU_ireg 0x%x\n",
+	DBG(KERN_INFO "%s: %s: CtrlReg 0x%x CPUifReg 0x%x\n",
 	    dev->name, __FUNCTION__,
 	    CANin(base, controlReg), CANin(base, cpuInterfaceReg));
 }
@@ -666,7 +683,7 @@ static void chipset_init_trx(struct net_device *dev)
 	// Clear bus-off, Interrupts only for errors, not for status change
 	CANout(base, controlReg, iCTL_IE | iCTL_EIE);
 
-	DBG(KERN_INFO "%s: %s: CtrlReg 0x%x CPU_ireg 0x%x\n",
+	DBG(KERN_INFO "%s: %s: CtrlReg 0x%x CPUifReg 0x%x\n",
 	    dev->name, __FUNCTION__,
 	    CANin(base, controlReg), CANin(base, cpuInterfaceReg));
 }
