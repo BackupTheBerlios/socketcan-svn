@@ -165,6 +165,15 @@ module_param(clk, int, 0);
 module_param(debug, int, 0);
 module_param(restart_ms, int, 0);
 
+MODULE_PARM_DESC(base, "CAN controller base address");
+MODULE_PARM_DESC(irq, "CAN controller interrupt");
+MODULE_PARM_DESC(speed, "CAN bus bitrate");
+MODULE_PARM_DESC(btr, "Bit Timing Register value 0x<btr0><btr1>, e.g. 0x4014");
+MODULE_PARM_DESC(rx_probe, "switch to trx mode after correct msg receiption. (default off)");
+
+MODULE_PARM_DESC(clk, "CAN controller chip clock (default: 16MHz)");
+MODULE_PARM_DESC(debug, "set debug mask (default: 0)");
+MODULE_PARM_DESC(restart_ms, "restart chip on heavy bus errors / bus off after x ms (default 100ms)");
 
 /* function declarations */
 
