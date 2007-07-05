@@ -259,7 +259,7 @@ static int vcan_newlink(struct net_device *dev,
 	struct vcan_priv *priv = netdev_priv(dev);
 	int err;
 
-	err = register_netdev(dev);
+	err = register_netdevice(dev);
 	if (err < 0)
 		return err;
 
@@ -273,7 +273,7 @@ static void vcan_dellink(struct net_device *dev)
 	struct vcan_priv *priv = netdev_priv(dev);
 
 	list_del(&priv->list);
-	unregister_netdev(dev);
+	unregister_netdevice(dev);
 }
 
 static struct rtnl_link_ops vcan_link_ops __read_mostly = {
@@ -308,9 +308,12 @@ static __init int vcan_init_module(void)
 			err = -ENOMEM;
 			break;
 		}
+		err = dev_alloc_name(dev, dev->name);
+		if (err < 0)
+			break;
 
 		dev->rtnl_link_ops = &vcan_link_ops;
-		err = register_netdev(dev);
+		err = register_netdevice(dev);
 		if (err < 0) {
 			printk(KERN_ERR
 			       "vcan: error %d registering interface %s\n",
