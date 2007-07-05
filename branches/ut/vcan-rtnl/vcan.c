@@ -50,7 +50,6 @@
 #include <linux/if_ether.h>
 #include <linux/can.h>
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,23)
-#include <linux/rtnetlink.h>
 #include <net/rtnetlink.h>
 #endif
 
@@ -233,8 +232,6 @@ static void vcan_setup(struct net_device *dev)
 
 	ether_setup(dev);
 
-	memset(dev->priv, 0, PRIVSIZE);
-
 	dev->type              = ARPHRD_CAN;
 	dev->mtu               = sizeof(struct can_frame);
 	dev->flags             = IFF_NOARP;
@@ -260,10 +257,15 @@ static int vcan_newlink(struct net_device *dev,
 			struct nlattr *tb[], struct nlattr *data[])
 {
 	struct vcan_priv *priv = netdev_priv(dev);
+	int err;
+
+	err = register_netdev(dev);
+	if (err < 0)
+		return err;
 
 	priv->dev = dev;
 	list_add_tail(&priv->list, &vcan_devs);
-	return register_netdev(dev);
+	return 0;
 }
 
 static void vcan_dellink(struct net_device *dev)
@@ -325,9 +327,11 @@ static __init int vcan_init_module(void)
 		}
 	}
 
-	if (err < 0)
+	if (err < 0) {
 		list_for_each_entry_safe(priv, n, &vcan_devs, list)
 			vcan_dellink(priv->dev);
+		__rtnl_link_unregister(&vcan_link_ops);
+	}
  out:
 	rtnl_unlock();
 	return err;
