@@ -1,0 +1,15 @@
+menu "CAN Device Drivers"
+	depends on CAN
+
+config CAN_VCAN
+	tristate "Virtual Local CAN Interface (vcan)"
+ 	depends on CAN
+	default N
+ 	---help---
+	  Similar to the network loopback devices, vcan offers a
+	  virtual local CAN interface.
+
+	  This driver can also be built as a module.  If so, the module
+	  will be called vcan.
+
+endmenu
