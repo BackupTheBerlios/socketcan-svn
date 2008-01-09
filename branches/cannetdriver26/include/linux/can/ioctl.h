@@ -1,3 +1,4 @@
+
 /*
  * linux/can/ioctl.h
  *
@@ -99,19 +100,6 @@ typedef __u32 can_ctrlmode_t;
 #define CAN_CTRLMODE_LISTENONLY 0x2
 
 
-/* SIOCGCANFILTER */
-
-typedef __u32 can_filter_t;
-
-/* filter modes (may vary due to controller specific capabilities) */
-#define CAN_FILTER_CAPAB       0  /* get filter type capabilities (32 Bit value) */
-#define CAN_FILTER_MASK_VALUE  1  /* easy bit filter (see struct can_filter) */
-#define CAN_FILTER_SFF_BITMASK 2  /* bitfield with 2048 bit SFF filter */
-				  /* filters 3 - 31 currently undefined */
-
-#define CAN_FILTER_MAX         31 /* max. filter type value */
-
-
 /* SIOCGCANSTATE */
 
 typedef __u32 can_state_t;
@@ -120,7 +108,6 @@ typedef __u32 can_state_t;
 #define CAN_STATE_BUS_WARNING		1
 #define CAN_STATE_BUS_PASSIVE		2
 #define CAN_STATE_BUS_OFF		3
-#define CAN_STATE_SCANNING_BAUDRATE	4
 #define CAN_STATE_STOPPED		5
 #define CAN_STATE_SLEEPING		6
 
@@ -137,15 +124,5 @@ struct can_device_stats {
 	int restarts;
 	int bus_error_at_init;
 };
-
-/* SIOC[SG]CANERRORCONFIG */
-
-typedef enum CAN_ERRCFG_TYPE {
-	CAN_ERRCFG_MASK,
-	CAN_ERRCFG_BUSERR,
-	CAN_ERRCFG_BUSOFF
-} can_errcfg_type_t;
-
-/* tbd */
 
 #endif /* CAN_IOCTL_H */
