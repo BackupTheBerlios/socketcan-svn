@@ -120,4 +120,12 @@ config CAN_IXXAT_PCI
 	This driver is for the IXXAT PC-I 04/PCI card (1 or 2 channel)
 	from the IXXAT Automation GmbH (http://www.ixxat.de).
 
+config CAN_PEAK_PCI
+	tristate "PEAK PCAN PCI Card"
+	depends on PCI && CAN_SJA1000
+	help
+
+	This driver is for the PCAN PCI, the PC-PCI CAN plug-in card (1 or
+	2 channel) from PEAK Systems (http://www.peak-system.com).
+
 endmenu
