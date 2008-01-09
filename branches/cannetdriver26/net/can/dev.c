@@ -30,25 +30,25 @@ MODULE_AUTHOR("Marc Kleine-Budde <mkl@pengutronix.de>, "
 	      "Andrey Volkov <avolkov@varma-el.com>");
 
 /*
- Abstract:
-	Baud rate calculated with next formula:
-	baud = frq/(brp*(1 + prop_seg+ phase_seg1 + phase_seg2))
+ * Abstract:
+ *   Baud rate calculated with next formula:
+ *   baud = frq/(brp*(1 + prop_seg+ phase_seg1 + phase_seg2))
+ *
+ *   This calc function based on work of Florian Hartwich and Armin Bassemi
+ *   "The Configuration of the CAN Bit Timing"
+ *   (http://www.semiconductors.bosch.de/pdf/CiA99Paper.pdf)
+ *
+ *  Parameters:
+ *  [in]
+ *    bit_time_nsec - expected bit time in nanosecs
+ *
+ *  [out]
+ *    bit_time      - calculated time segments, for meaning of
+ * 		      each field read CAN standard.
+ */
 
-	This calc function based on work of Florian Hartwich and Armin Bassemi
-	"The Configuration of the CAN Bit Timing"
-	(http://www.semiconductors.bosch.de/pdf/CiA99Paper.pdf)
-
- Parameters:
-  [in]
-    bit_time_nsec - expected bit time in nanosecs
-
-  [out]
-	bit_time	- calculated time segments, for meaning of
-			  each field read CAN standard.
-*/
-
-#define DEFAULT_MAX_BRP			64U
-#define DEFAULT_MAX_SJW			4U
+#define DEFAULT_MAX_BRP	64U
+#define DEFAULT_MAX_SJW	4U
 
 /* All below values in tq units */
 #define MAX_BIT_TIME	25U
@@ -60,9 +60,10 @@ MODULE_AUTHOR("Marc Kleine-Budde <mkl@pengutronix.de>, "
 int can_calc_bit_time(struct can_priv *can, u32 baudrate,
 		      struct can_bittime_std *bit_time)
 {
-	int best_error  = -1; /* Ariphmetic error */
-	int df, best_df = -1; /* oscillator's tolerance range, greater is better*/
-	u32 quanta;	      /*in tq units*/
+	int best_error = -1;	/* Ariphmetic error */
+	int df, best_df = -1;	/* oscillator's tolerance range,
+				   greater is better */
+	u32 quanta;		/* in tq units */
 	u32 brp, phase_seg1, phase_seg2, sjw, prop_seg;
 	u32 brp_min, brp_max, brp_expected;
 	u64 tmp;
@@ -71,9 +72,9 @@ int can_calc_bit_time(struct can_priv *can, u32 baudrate,
 	if (baudrate == 0 || baudrate > 1000000UL)
 		return -EINVAL;
 
-	tmp = (u64)can->can_sys_clock*1000;
+	tmp = (u64) can->can_sys_clock * 1000;
 	do_div(tmp, baudrate);
-	brp_expected = (u32)tmp;
+	brp_expected = (u32) tmp;
 
 	brp_min = brp_expected / (1000 * MAX_BIT_TIME);
 	if (brp_min == 0)
@@ -89,7 +90,8 @@ int can_calc_bit_time(struct can_priv *can, u32 baudrate,
 
 	for (brp = brp_min; brp <= brp_max; brp++) {
 		quanta = brp_expected / (brp * 1000);
-		if (quanta < MAX_BIT_TIME && quanta * brp * 1000 != brp_expected)
+		if (quanta < MAX_BIT_TIME
+		    && quanta * brp * 1000 != brp_expected)
 			quanta++;
 		if (quanta < MIN_BIT_TIME || quanta > MAX_BIT_TIME)
 			continue;
@@ -98,31 +100,40 @@ int can_calc_bit_time(struct can_priv *can, u32 baudrate,
 		for (sjw = can->max_sjw; sjw > 0; sjw--) {
 			for (; phase_seg2 > sjw; phase_seg2--) {
 				u32 err1, err2;
-				phase_seg1 = phase_seg2 % 2 ? phase_seg2-1 : phase_seg2;
-				prop_seg = quanta-1 - phase_seg2 - phase_seg1;
+				phase_seg1 =
+				    phase_seg2 % 2 ? phase_seg2 -
+				    1 : phase_seg2;
+				prop_seg = quanta - 1 - phase_seg2 - phase_seg1;
 				/*
-				 * FIXME: support of longer lines (i.e. bigger prop_seg)
-				 * is more prefered than support of cheap oscillators
-				 * (i.e. bigger df/phase_seg1/phase_seg2)
+				 * FIXME: support of longer lines (i.e. bigger
+				 * prop_seg) is more prefered than support of
+				 * cheap oscillators (i.e. bigger
+				 * df/phase_seg1/phase_seg2)
 				 */
 				if (prop_seg < phase_seg1)
-						continue;
+					continue;
 				if (prop_seg > MAX_PROP_SEG)
-						goto next_brp;
+					goto next_brp;
 
-				err1 = phase_seg1*brp*500*1000/
-					(13*brp_expected-phase_seg2*brp*1000);
-				err2 = sjw*brp*50*1000/brp_expected;
+				err1 = phase_seg1 * brp * 500 * 1000 /
+				    (13 * brp_expected -
+				     phase_seg2 * brp * 1000);
+				err2 = sjw * brp * 50 * 1000 / brp_expected;
 
-				df = min(err1,err2);
+				df = min(err1, err2);
 				if (df >= best_df) {
-					unsigned error = abs(brp_expected*10/
-							   (brp*(1+prop_seg+phase_seg1+phase_seg2))-10000);
+					unsigned error =
+						abs(brp_expected * 10 /
+						    (brp * (1 + prop_seg +
+							    phase_seg1 +
+							    phase_seg2)) -
+						    10000);
 
 					if (error > 10 || error > best_error)
 						continue;
 
-					if (error == best_error && prop_seg < bit_time->prop_seg)
+					if (error == best_error
+					    && prop_seg < bit_time->prop_seg)
 						continue;
 
 					best_error = error;
@@ -132,11 +143,12 @@ int can_calc_bit_time(struct can_priv *can, u32 baudrate,
 					bit_time->phase_seg1 = phase_seg1;
 					bit_time->phase_seg2 = phase_seg2;
 					bit_time->sjw = sjw;
-					bit_time->sam = (bit_time->phase_seg1 > 3);
+					bit_time->sam =
+						(bit_time->phase_seg1 > 3);
 				}
 			}
 		}
-	next_brp:	;
+	      next_brp:;
 	}
 
 	if (best_error < 0)
@@ -149,10 +161,11 @@ static int can_ioctl(struct net_device *dev, struct ifreq *ifr, int cmd)
 {
 	struct can_priv *can = netdev_priv(dev);
 	struct can_bittime *bt = (struct can_bittime *)&ifr->ifr_ifru;
-	ulong *baudrate = (ulong *)&ifr->ifr_ifru;
+	ulong *baudrate = (ulong *) & ifr->ifr_ifru;
 	int err = -EOPNOTSUPP;
 
-	dev_dbg(ND2D(dev), "(%s) 0x%08x %p\n", __FUNCTION__, cmd, &ifr->ifr_ifru);
+	dev_dbg(ND2D(dev), "(%s) 0x%08x %p\n", __FUNCTION__, cmd,
+		&ifr->ifr_ifru);
 
 	switch (cmd) {
 	case SIOCSCANBAUDRATE:
@@ -179,8 +192,11 @@ static int can_ioctl(struct net_device *dev, struct ifreq *ifr, int cmd)
 			if (!err) {
 				can->bit_time = *bt;
 				if (bt->type == CAN_BITTIME_STD && bt->std.brp) {
-					can->baudrate = can->can_sys_clock/(bt->std.brp*
-						(1+bt->std.prop_seg+bt->std.phase_seg1+bt->std.phase_seg2));
+					can->baudrate = can->can_sys_clock /
+						(bt->std.brp *
+						 (1 + bt->std.prop_seg +
+						  bt->std.phase_seg1 +
+						  bt->std.phase_seg2));
 				} else
 					can->baudrate = CAN_BAUDRATE_UNKNOWN;
 			}
@@ -192,27 +208,29 @@ static int can_ioctl(struct net_device *dev, struct ifreq *ifr, int cmd)
 		break;
 	case SIOCSCANMODE:
 		if (can->do_set_mode) {
-			can_mode_t mode = *((can_mode_t *)(&ifr->ifr_ifru));
+			can_mode_t mode = *((can_mode_t *) (&ifr->ifr_ifru));
 			if (mode == CAN_MODE_START &&
 			    can->baudrate == CAN_BAUDRATE_UNCONFIGURED) {
-				dev_info(ND2D(dev), "Impossible to start on UNKNOWN speed\n");
+				dev_info(ND2D(dev),
+					 "Impossible to start on UNKNOWN speed\n");
 				err = EINVAL;
 			} else
 				return can->do_set_mode(dev, mode);
 		}
 		break;
 	case SIOCGCANMODE:
-		*((can_mode_t *)(&ifr->ifr_ifru)) = can->mode;
+		*((can_mode_t *) (&ifr->ifr_ifru)) = can->mode;
 		err = 0;
 		break;
 	case SIOCSCANCTRLMODE:
 		if (can->do_set_ctrlmode) {
-			can_ctrlmode_t ctrlmode = *((can_ctrlmode_t *)(&ifr->ifr_ifru));
+			can_ctrlmode_t ctrlmode =
+			    *((can_ctrlmode_t *) (&ifr->ifr_ifru));
 			return can->do_set_ctrlmode(dev, ctrlmode);
 		}
 		break;
 	case SIOCGCANCTRLMODE:
-		*((can_ctrlmode_t *)(&ifr->ifr_ifru)) = can->ctrlmode;
+		*((can_ctrlmode_t *) (&ifr->ifr_ifru)) = can->ctrlmode;
 		err = 0;
 		break;
 	case SIOCSCANFILTER:
@@ -221,7 +239,9 @@ static int can_ioctl(struct net_device *dev, struct ifreq *ifr, int cmd)
 		break;
 	case SIOCGCANSTATE:
 		if (can->do_get_state)
-			return can->do_get_state(dev, (can_state_t *)(&ifr->ifr_ifru));
+			return can->do_get_state(dev,
+						 (can_state_t *) (&ifr->
+								  ifr_ifru));
 		break;
 	case SIOCGCANSTATS:
 		*((struct can_device_stats *)(&ifr->ifr_ifru)) = can->can_stats;
@@ -243,18 +263,18 @@ static struct net_device_stats *can_get_stats(struct net_device *dev)
 
 static void can_setup(struct net_device *dev)
 {
-	dev->type            = ARPHRD_CAN;
-	dev->mtu             = sizeof(struct can_frame);
-	dev->do_ioctl        = can_ioctl;
+	dev->type = ARPHRD_CAN;
+	dev->mtu = sizeof(struct can_frame);
+	dev->do_ioctl = can_ioctl;
 	dev->hard_header_len = 0;
-	dev->addr_len        = 0;
-	dev->tx_queue_len    = 10;
+	dev->addr_len = 0;
+	dev->tx_queue_len = 10;
 
 	/* New-style flags. */
-	dev->flags           = IFF_NOARP;
-	dev->features        = NETIF_F_NO_CSUM;
+	dev->flags = IFF_NOARP;
+	dev->features = NETIF_F_NO_CSUM;
 #if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,23)
-	dev->get_stats       = can_get_stats;
+	dev->get_stats = can_get_stats;
 #endif
 }
 
@@ -274,16 +294,18 @@ struct net_device *alloc_candev(int sizeof_priv)
 	priv = netdev_priv(dev);
 
 	priv->baudrate = CAN_BAUDRATE_UNCONFIGURED;
-	priv->max_brp  = DEFAULT_MAX_BRP;
-	priv->max_sjw  = DEFAULT_MAX_SJW;
+	priv->max_brp = DEFAULT_MAX_BRP;
+	priv->max_sjw = DEFAULT_MAX_SJW;
 	spin_lock_init(&priv->irq_lock);
 
 	return dev;
 }
+
 EXPORT_SYMBOL(alloc_candev);
 
 void free_candev(struct net_device *dev)
 {
 	free_netdev(dev);
 }
+
 EXPORT_SYMBOL(free_candev);
