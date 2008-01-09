@@ -31,8 +31,8 @@ MODULE_AUTHOR("Marc Kleine-Budde <mkl@pengutronix.de>, "
 
 /*
  * Abstract:
- *   Baud rate calculated with next formula:
- *   baud = frq/(brp*(1 + prop_seg+ phase_seg1 + phase_seg2))
+ *   Bit rate calculated with next formula:
+ *   bitrate = frq/(brp*(1 + prop_seg+ phase_seg1 + phase_seg2))
  *
  *   This calc function based on work of Florian Hartwich and Armin Bassemi
  *   "The Configuration of the CAN Bit Timing"
@@ -57,7 +57,7 @@ MODULE_AUTHOR("Marc Kleine-Budde <mkl@pengutronix.de>, "
 #define MAX_PHASE_SEG1	8U
 #define MAX_PHASE_SEG2	8U
 
-int can_calc_bit_time(struct can_priv *can, u32 baudrate,
+int can_calc_bit_time(struct can_priv *can, u32 bitrate,
 		      struct can_bittime_std *bit_time)
 {
 	int best_error = -1;	/* Ariphmetic error */
@@ -68,12 +68,12 @@ int can_calc_bit_time(struct can_priv *can, u32 baudrate,
 	u32 brp_min, brp_max, brp_expected;
 	u64 tmp;
 
-	/* baudrate range [1baud,1Mbaud] */
-	if (baudrate == 0 || baudrate > 1000000UL)
+	/* bitrate range [1baud,1MiB/s] */
+	if (bitrate == 0 || bitrate > 1000000UL)
 		return -EINVAL;
 
 	tmp = (u64) can->can_sys_clock * 1000;
-	do_div(tmp, baudrate);
+	do_div(tmp, bitrate);
 	brp_expected = (u32) tmp;
 
 	brp_min = brp_expected / (1000 * MAX_BIT_TIME);
@@ -197,7 +197,7 @@ struct net_device *alloc_candev(int sizeof_priv)
 
 	priv = netdev_priv(dev);
 
-	priv->baudrate = CAN_BAUDRATE_UNCONFIGURED;
+	priv->bitrate = CAN_BITRATE_UNCONFIGURED;
 	priv->max_brp = DEFAULT_MAX_BRP;
 	priv->max_sjw = DEFAULT_MAX_SJW;
 	spin_lock_init(&priv->irq_lock);

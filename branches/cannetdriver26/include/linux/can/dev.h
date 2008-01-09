@@ -40,7 +40,7 @@ struct can_priv {
 	 */
 	u8 max_sjw;
 
-	u32 baudrate;		/* in bauds */
+	u32 bitrate;
 	struct can_bittime bit_time;
 
 	spinlock_t irq_lock;
@@ -68,7 +68,7 @@ struct can_priv {
 struct net_device *alloc_candev(int sizeof_priv);
 void free_candev(struct net_device *dev);
 
-int can_calc_bit_time(struct can_priv *can, u32 baudrate,
+int can_calc_bit_time(struct can_priv *can, u32 bitrate,
 		      struct can_bittime_std *bit_time);
 
 #endif /* CAN_DEVICE_H */

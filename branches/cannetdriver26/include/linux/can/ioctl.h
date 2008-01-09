@@ -16,10 +16,11 @@
 #include <linux/sockios.h>
 
 /*
- * CAN baudrate
+ * CAN bitrate
  */
-#define CAN_BAUDRATE_UNCONFIGURED	((__u32) 0xFFFFFFFFU)
-#define CAN_BAUDRATE_UNKNOWN		0
+#define CAN_BITRATE_UNCONFIGURED	((__u32) 0xFFFFFFFFU)
+#define CAN_BITRATE_UNKNOWN		0
+#define CAN_BITRATE_DEFAULT		500000
 
 /*
  * CAN custom bit time

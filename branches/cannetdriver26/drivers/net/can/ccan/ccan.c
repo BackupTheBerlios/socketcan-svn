@@ -478,7 +478,7 @@ static int ccan_chip_config(struct net_device *dev)
 	
 	/* set bit timing */
 	bit_time.type = CAN_BITTIME_STD;
-	ret = can_calc_bit_time(&priv->can, priv->can.baudrate, &bit_time.std);
+	ret = can_calc_bit_time(&priv->can, priv->can.bitrate, &bit_time.std);
 	if (ret == 0)
 		ret = ccan_set_bit_time(dev, &bit_time);
 	if (ret)
@@ -519,7 +519,7 @@ struct net_device *alloc_ccandev(int sizeof_priv)
 	dev->hard_start_xmit = ccan_hard_start_xmit;
 	dev->tx_timeout = ccan_tx_timeout;
 
-	priv->can.baudrate = 500000;
+	priv->can.bitrate = 500000;
 
 	priv->can.do_set_bit_time = ccan_set_bit_time;
 	priv->can.do_get_state = ccan_get_state;
