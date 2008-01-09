@@ -551,28 +551,6 @@ static int sja1000_start_xmit(struct sk_buff *skb, struct net_device *dev)
 	return 0;
 }
 
-static void sja1000_tx_timeout(struct net_device *dev)
-{
-	struct sja1000_priv *priv = netdev_priv(dev);
-	struct net_device_stats *stats = dev->get_stats(dev);
-
-	stats->tx_errors++;
-
-	/* do not conflict with e.g. bus error handling */
-	if (!(priv->timer.expires)) {	/* no restart on the run */
-		chipset_init_trx(dev);	/* no tx queue wakeup */
-		priv->can.can_stats.restarts++;
-		if (priv->echo_skb) {	/* pending echo? */
-			kfree_skb(priv->echo_skb);
-			priv->echo_skb = NULL;
-		}
-		netif_wake_queue(dev);	/* wakeup here */
-	} else
-		DBG(KERN_INFO "%s: %s: can_restart_dev already active.\n",
-		    dev->name, __FUNCTION__);
-
-}
-
 static void can_restart_on(struct net_device *dev)
 {
 	struct sja1000_priv *priv = netdev_priv(dev);
@@ -1002,8 +980,6 @@ int register_sja1000dev(struct net_device *dev)
 	dev->open = sja1000_open;
 	dev->stop = sja1000_close;
 	dev->hard_start_xmit = sja1000_start_xmit;
-	dev->tx_timeout = sja1000_tx_timeout;
-	dev->watchdog_timeo = TX_TIMEOUT;
 
 	priv->can.do_set_bittime = sja1000_set_bittime;
 	priv->can.do_get_state = sja1000_get_state;
