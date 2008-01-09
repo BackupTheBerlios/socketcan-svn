@@ -50,6 +50,7 @@ struct can_priv {
 	can_state_t state;
 	can_mode_t mode;
 	u32 ctrlmode;
+	int restart_ms;
 
 	int (*do_set_bittime)(struct net_device * dev,
 			      struct can_bittime * br);

@@ -187,6 +187,24 @@ static int can_get_clock(struct net_device *dev, u32 *clock)
 	return 0;
 }
 
+static int can_set_restart_ms(struct net_device *dev, int ms)
+{
+	struct can_priv *priv = netdev_priv(dev);
+
+	if (priv->restart_ms < 0)
+		return -EOPNOTSUPP;
+	priv->restart_ms = ms;
+	return 0;
+}
+
+static int can_get_restart_ms(struct net_device *dev, int *ms)
+{
+	struct can_priv *priv = netdev_priv(dev);
+
+	*ms = priv->restart_ms;
+	return 0;
+}
+
 /*
  * SYSFS access functions and attributes.
  * Use same locking as net/core/net-sysfs.c
@@ -235,6 +253,7 @@ static DEVICE_ATTR(_name, S_IRUGO | S_IWUSR, 				\
 		   can_show_##_func, can_store_##_func)
 
 CAN_ATTR(can_bitrate, bitrate, u32, "%d");
+CAN_ATTR(can_restart_ms, restart_ms, int, "%d");
 CAN_ATTR(can_clock, clock, u32, "%d");
 
 #define CAN_STATS_ATTR(_name)						\
@@ -269,6 +288,7 @@ CAN_STATS_ATTR(bus_error);
 CAN_STATS_ATTR(arbitration_lost);
 CAN_STATS_ATTR(data_overrun);
 CAN_STATS_ATTR(wakeup);
+CAN_STATS_ATTR(restarts);
 
 static const char *can_mode_names[] = {
 	"stop", "start", "sleep", "unkown"
