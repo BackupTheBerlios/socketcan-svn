@@ -81,6 +81,7 @@ struct mscan_state {
 typedef struct {
 	struct list_head list;
 	u8 mask;
+	u8 id;
 } tx_queue_entry_t;
 
 struct mscan_priv {
@@ -106,11 +107,20 @@ struct mscan_priv {
 static int mscan_set_mode(struct net_device *dev, u8 mode)
 {
 	struct mscan_regs *regs = (struct mscan_regs *)dev->base_addr;
+	struct mscan_priv *priv = netdev_priv(dev);
 	int ret = 0;
 	int i;
 	u8 canctl1;
 
 	if (mode != MSCAN_NORMAL_MODE) {
+
+		if (priv->tx_active) {
+			/* Abort transfers before going to sleep */
+			out_8(&regs->cantier, 0);
+			out_8(&regs->cantarq, priv->tx_active);
+			out_8(&regs->cantier, priv->tx_active);
+		}
+
 		canctl1 = in_8(&regs->canctl1);
 		if ((mode & MSCAN_SLPRQ) && (canctl1 & MSCAN_SLPAK) == 0) {
 			out_8(&regs->canctl0,
@@ -122,6 +132,8 @@ static int mscan_set_mode(struct net_device *dev, u8 mode)
 			}
 			if (i >= MSCAN_SET_MODE_RETRIES)
 				ret = -ENODEV;
+			else
+				priv->can.state = CAN_STATE_SLEEPING;
 		}
 
 		if (!ret && (mode & MSCAN_INITRQ)
@@ -134,6 +146,8 @@ static int mscan_set_mode(struct net_device *dev, u8 mode)
 			}
 			if (i >= MSCAN_SET_MODE_RETRIES)
 				ret = -ENODEV;
+			else
+				priv->can.state = CAN_STATE_STOPPED;
 		}
 
 		if (!ret && (mode & MSCAN_CSWAI))
@@ -152,30 +166,9 @@ static int mscan_set_mode(struct net_device *dev, u8 mode)
 			}
 			if (i >= MSCAN_SET_MODE_RETRIES)
 				ret = -ENODEV;
+			else
+				priv->can.state = CAN_STATE_ACTIVE;
 		}
-	}
-	return ret;
-}
-
-static void mscan_push_state(struct net_device *dev, struct mscan_state *state)
-{
-	struct mscan_regs *regs = (struct mscan_regs *)dev->base_addr;
-
-	state->mode = in_8(&regs->canctl0) & (MSCAN_SLPRQ | MSCAN_INITRQ |
-					      MSCAN_CSWAI);
-	state->canrier = in_8(&regs->canrier);
-	state->cantier = in_8(&regs->cantier);
-}
-
-static int mscan_pop_state(struct net_device *dev, struct mscan_state *state)
-{
-	struct mscan_regs *regs = (struct mscan_regs *)dev->base_addr;
-
-	int ret;
-	ret = mscan_set_mode(dev, state->mode);
-	if (!ret) {
-		out_8(&regs->canrier, state->canrier);
-		out_8(&regs->cantier, state->cantier);
 	}
 	return ret;
 }
@@ -185,7 +178,6 @@ static int mscan_hard_start_xmit(struct sk_buff *skb, struct net_device *dev)
 	struct can_frame *frame = (struct can_frame *)skb->data;
 	struct mscan_regs *regs = (struct mscan_regs *)dev->base_addr;
 	struct mscan_priv *priv = netdev_priv(dev);
-
 	int i, rtr, buf_id;
 	u32 can_id;
 
@@ -256,7 +248,7 @@ static int mscan_hard_start_xmit(struct sk_buff *skb, struct net_device *dev)
 
 	list_add_tail(&priv->tx_queue[buf_id].list, &priv->tx_head);
 
-	kfree_skb(skb);
+	can_put_echo_skb(skb, dev, buf_id);
 
 	/* Enable interrupt. */
 	priv->tx_active |= 1 << buf_id;
@@ -299,7 +291,6 @@ static void mscan_tx_timeout(struct net_device *dev)
 	skb->ip_summed = CHECKSUM_UNNECESSARY;
 
 	netif_rx(skb);
-
 }
 
 static can_state_t state_map[] = {
@@ -318,8 +309,8 @@ static inline int check_set_state(struct net_device *dev, u8 canrflg)
 	if (!(canrflg & MSCAN_CSCIF) || priv->can.state > CAN_STATE_BUS_OFF)
 		return 0;
 
-	state =
-	    state_map[max(MSCAN_STATE_RX(canrflg), MSCAN_STATE_TX(canrflg))];
+	state = state_map[max(MSCAN_STATE_RX(canrflg),
+			      MSCAN_STATE_TX(canrflg))];
 	if (priv->can.state < state)
 		ret = 1;
 	if (state == CAN_STATE_BUS_OFF)
@@ -442,6 +433,8 @@ static int mscan_rx_poll(struct net_device *dev, int *budget)
 					frame->can_id |= CAN_ERR_BUSOFF;
 					frame->can_id &= ~CAN_ERR_CRTL;
 					break;
+				default:
+					break;
 				}
 			}
 			priv->shadow_statflg = canrflg & MSCAN_STAT_MSK;
@@ -507,9 +500,9 @@ static irqreturn_t mscan_isr(int irq, void *dev_id)
 				stats->tx_aborted_errors++;
 			} else {
 				out_8(&regs->cantbsel, mask);
-				stats->tx_bytes +=
-				    in_8(&regs->tx.dlr);
+				stats->tx_bytes += in_8(&regs->tx.dlr);
 				stats->tx_packets++;
+				can_get_echo_skb(dev, entry->id);
 			}
 			priv->tx_active &= ~mask;
 			list_del(pos);
@@ -575,33 +568,30 @@ static int mscan_do_set_mode(struct net_device *dev, can_mode_t mode)
 
 static int mscan_do_set_bittime(struct net_device *dev, struct can_bittime *bt)
 {
-	struct mscan_priv *priv = netdev_priv(dev);
 	struct mscan_regs *regs = (struct mscan_regs *)dev->base_addr;
-	int ret = 0;
-	u8 reg;
-	struct mscan_state state;
+	u8 btr0, btr1;
 
-	if (bt->type != CAN_BITTIME_STD)
+	switch (bt->type) {
+	case CAN_BITTIME_BTR:
+		btr0 = bt->btr.btr0;
+		btr1 = bt->btr.btr1;
+		break;
+
+	case CAN_BITTIME_STD:
+		btr0 = BTR0_SET_BRP(bt->std.brp) | BTR0_SET_SJW(bt->std.sjw);
+		btr1 = (BTR1_SET_TSEG1(bt->std.prop_seg + bt->std.phase_seg1) |
+			BTR1_SET_TSEG2(bt->std.phase_seg2) |
+			BTR1_SET_SAM(bt->std.sam));
+		break;
+
+	default:
 		return -EINVAL;
-
-	spin_lock_irq(&priv->can.irq_lock);
-
-	mscan_push_state(dev, &state);
-	ret = mscan_set_mode(dev, MSCAN_INIT_MODE);
-	if (!ret) {
-		reg = BTR0_SET_BRP(bt->std.brp) | BTR0_SET_SJW(bt->std.sjw);
-		out_8(&regs->canbtr0, reg);
-
-		reg = (BTR1_SET_TSEG1(bt->std.prop_seg + bt->std.phase_seg1) |
-		       BTR1_SET_TSEG2(bt->std.phase_seg2) |
-		       BTR1_SET_SAM(bt->std.sam));
-		out_8(&regs->canbtr1, reg);
-
-		ret = mscan_pop_state(dev, &state);
 	}
 
-	spin_unlock_irq(&priv->can.irq_lock);
-	return ret;
+	out_8(&regs->canbtr0, btr0);
+	out_8(&regs->canbtr1, btr1);
+
+	return 0;
 }
 
 static int mscan_open(struct net_device *dev)
@@ -629,19 +619,6 @@ static int mscan_open(struct net_device *dev)
 	}
 
 	INIT_LIST_HEAD(&priv->tx_head);
-	/* acceptance mask/acceptance code (accept everything) */
-	out_be16(&regs->canidar1_0, 0);
-	out_be16(&regs->canidar3_2, 0);
-	out_be16(&regs->canidar5_4, 0);
-	out_be16(&regs->canidar7_6, 0);
-
-	out_be16(&regs->canidmr1_0, 0xffff);
-	out_be16(&regs->canidmr3_2, 0xffff);
-	out_be16(&regs->canidmr5_4, 0xffff);
-	out_be16(&regs->canidmr7_6, 0xffff);
-	/* Two 32 bit Acceptance Filters */
-	out_8(&regs->canidac, MSCAN_AF_32BIT);
-
 	out_8(&regs->canctl1, in_8(&regs->canctl1) & ~MSCAN_LISTEN);
 	mscan_set_mode(dev, MSCAN_NORMAL_MODE);
 
@@ -677,6 +654,7 @@ static int mscan_close(struct net_device *dev)
 int register_mscandev(struct net_device *dev, int clock_src)
 {
 	struct mscan_regs *regs = (struct mscan_regs *)dev->base_addr;
+	struct mscan_priv *priv = netdev_priv(dev);
 	u8 ctl1;
 
 	ctl1 = in_8(&regs->canctl1);
@@ -689,7 +667,29 @@ int register_mscandev(struct net_device *dev, int clock_src)
 	out_8(&regs->canctl1, ctl1);
 	udelay(100);
 
+	/* acceptance mask/acceptance code (accept everything) */
+	out_be16(&regs->canidar1_0, 0);
+	out_be16(&regs->canidar3_2, 0);
+	out_be16(&regs->canidar5_4, 0);
+	out_be16(&regs->canidar7_6, 0);
+
+	out_be16(&regs->canidmr1_0, 0xffff);
+	out_be16(&regs->canidmr3_2, 0xffff);
+	out_be16(&regs->canidmr5_4, 0xffff);
+	out_be16(&regs->canidmr7_6, 0xffff);
+	/* Two 32 bit Acceptance Filters */
+	out_8(&regs->canidac, MSCAN_AF_32BIT);
+
 	mscan_set_mode(dev, MSCAN_INIT_MODE);
+
+	/* set default bit timing */
+	if (priv->can.bitrate) {
+		struct can_bittime bt = { .type = CAN_BITTIME_STD };
+		if  (can_calc_bittime(&priv->can, priv->can.bitrate, &bt.std))
+			dev_err(ND2D(dev), "failed to calculate bit timing\n");
+		else
+			mscan_do_set_bittime(dev, &bt);
+	}
 
 	return register_netdev(dev);
 }
@@ -731,11 +731,14 @@ struct net_device *alloc_mscandev(void)
 	dev->weight = 8;
 #endif
 
+	priv->can.bitrate = CAN_BITRATE_DEFAULT;
 	priv->can.do_set_bittime = mscan_do_set_bittime;
 	priv->can.do_set_mode = mscan_do_set_mode;
 
-	for (i = 0; i < TX_QUEUE_SIZE; i++)
+	for (i = 0; i < TX_QUEUE_SIZE; i++) {
+		priv->tx_queue[i].id = i;
 		priv->tx_queue[i].mask = 1 << i;
+	}
 
 	return dev;
 }
