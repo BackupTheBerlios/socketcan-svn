@@ -50,7 +50,9 @@ struct can_priv {
 	can_state_t state;
 	can_mode_t mode;
 	u32 ctrlmode;
+
 	int restart_ms;
+	struct timer_list timer;
 
 	int (*do_set_bittime)(struct net_device * dev,
 			      struct can_bittime * br);
@@ -71,5 +73,9 @@ void free_candev(struct net_device *dev);
 
 int can_calc_bittime(struct can_priv *can, u32 bitrate,
 		     struct can_bittime_std *bittime);
+
+void can_bus_off(struct net_device *dev);
+
+void can_close_cleanup(struct net_device *dev);
 
 #endif /* CAN_DEVICE_H */

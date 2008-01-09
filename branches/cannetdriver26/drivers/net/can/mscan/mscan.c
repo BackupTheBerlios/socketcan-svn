@@ -323,10 +323,7 @@ static inline int check_set_state(struct net_device *dev, u8 canrflg)
 	if (priv->can.state < state)
 		ret = 1;
 	if (state == CAN_STATE_BUS_OFF)
-		netif_carrier_off(dev);
-	else if (priv->can.state == CAN_STATE_BUS_OFF
-		 && state != CAN_STATE_BUS_OFF)
-		netif_carrier_on(dev);
+		can_bus_off(dev);
 	priv->can.state = state;
 	return ret;
 }

@@ -160,7 +160,6 @@ MODULE_PARM_DESC(restart_ms, "Restart time after bus-off in ms(default 0)");
 
 /* function declarations */
 
-static void can_restart_dev(unsigned long data);
 static void chipset_init(struct net_device *dev, int wake);
 static void chipset_init_trx(struct net_device *dev);
 int set_reset_mode(struct net_device *dev);
@@ -177,49 +176,11 @@ static int sja1000_probe_chip(struct net_device *dev)
 	return 1;
 }
 
-static void can_restart_now(struct net_device *dev)
-{
-	struct sja1000_priv *priv = netdev_priv(dev);
-	struct net_device_stats *stats = dev->get_stats(dev);
-	struct sk_buff *skb;
-	struct can_frame *cf;
-
-	/* Cancel restart in progress */
-	if (priv->timer.expires) {
-		del_timer(&priv->timer);
-		/* mark inactive timer */
-		priv->timer.expires = 0;
-	}
-
-	/* count number of restarts */
-	priv->can.can_stats.restarts++;
-	chipset_init(dev, 1);
-
-	/* send restart message upstream */
-	skb = dev_alloc_skb(sizeof(struct can_frame));
-	if (skb == NULL)
-		return;
-	skb->dev = dev;
-	skb->protocol = htons(ETH_P_CAN);
-	cf = (struct can_frame *)skb_put(skb, sizeof(struct can_frame));
-	memset(cf, 0, sizeof(struct can_frame));
-	cf->can_id = CAN_ERR_FLAG | CAN_ERR_RESTARTED;
-	cf->can_dlc = CAN_ERR_DLC;
-
-	netif_rx(skb);
-
-	dev->last_rx = jiffies;
-	stats->rx_packets++;
-	stats->rx_bytes += cf->can_dlc;
-}
-
 int set_reset_mode(struct net_device *dev)
 {
 	struct sja1000_priv *priv = netdev_priv(dev);
 	unsigned char status = priv->read_reg(dev, REG_MOD);
 	int i;
-
-	priv->can.can_stats.bus_error_at_init = priv->can.can_stats.bus_error;
 
 	/* disable interrupts */
 	priv->write_reg(dev, REG_IER, IRQ_OFF);
@@ -290,8 +251,7 @@ static int sja1000_set_mode(struct net_device *dev, can_mode_t mode)
 		DBG("%s: CAN_MODE_START requested\n", __FUNCTION__);
 		if (!priv->open_time)
 			return -EINVAL;
-		set_reset_mode(dev);
-		can_restart_now(dev);
+		chipset_init_trx(dev);
 		break;
 
 	default:
@@ -345,7 +305,7 @@ static int sja1000_set_bittime(struct net_device *dev, struct can_bittime *bt)
 {
 	struct sja1000_priv *priv = netdev_priv(dev);
 	u8 btr0, btr1;
-	int state;
+
 	switch (bt->type) {
 	case CAN_BITTIME_BTR:
 		btr0 = bt->btr.btr0;
@@ -366,16 +326,8 @@ static int sja1000_set_bittime(struct net_device *dev, struct can_bittime *bt)
 	}
 	DBG("%s: BTR0 0x%02x BTR1 0x%02x\n", dev->name, btr0, btr1);
 
-	spin_lock_irq(&priv->can.irq_lock);
-	state = priv->can.state;
-	if (state != CAN_STATE_STOPPED)
-		set_reset_mode(dev);
 	priv->write_reg(dev, REG_BTR0, btr0);
 	priv->write_reg(dev, REG_BTR1, btr1);
-	spin_unlock_irq(&priv->can.irq_lock);
-
-	if (state != CAN_STATE_STOPPED)
-		can_restart_now(dev);
 
 	return 0;
 }
@@ -441,7 +393,7 @@ static void chipset_init_trx(struct net_device *dev)
 
 	iDBG(KERN_INFO "%s: %s()\n", dev->name, __FUNCTION__);
 
-	/* set chip into reset mode */
+	/* leave reset mode */
 	if (priv->can.state != CAN_STATE_STOPPED)
 		set_reset_mode(dev);
 
@@ -551,42 +503,6 @@ static int sja1000_start_xmit(struct sk_buff *skb, struct net_device *dev)
 	return 0;
 }
 
-static void can_restart_on(struct net_device *dev)
-{
-	struct sja1000_priv *priv = netdev_priv(dev);
-
-	if (!(priv->timer.expires)) {	/* no restart on the run */
-
-		set_reset_mode(dev);
-
-		priv->timer.function = can_restart_dev;
-		priv->timer.data = (unsigned long)dev;
-
-		/* restart chip on persistent error in <xxx> ms */
-		priv->timer.expires =
-			jiffies + (priv->can.restart_ms * HZ) / 1000;
-		add_timer(&priv->timer);
-
-		iDBG(KERN_INFO "%s: %s start (%ld)\n",
-		     dev->name, __FUNCTION__, jiffies);
-	} else
-		iDBG(KERN_INFO "%s: %s already (%ld)\n",
-		     dev->name, __FUNCTION__, jiffies);
-}
-
-static void can_restart_dev(unsigned long data)
-{
-	struct net_device *dev = (struct net_device *)data;
-	struct sja1000_priv *priv = netdev_priv(dev);
-
-	DBG(KERN_INFO "%s: can_restart_dev (%ld)\n", dev->name, jiffies);
-
-	/* mark inactive timer */
-	priv->timer.expires = 0;
-
-	can_restart_now(dev);
-}
-
 static void sja1000_rx(struct net_device *dev)
 {
 	struct sja1000_priv *priv = netdev_priv(dev);
@@ -655,7 +571,6 @@ static int sja1000_err(struct net_device *dev,
 	struct sk_buff *skb;
 	can_state_t state = priv->can.state;
 	uint8_t ecc, alc;
-	int restart = 0;
 
 	skb = dev_alloc_skb(sizeof(struct can_frame));
 	if (skb == NULL)
@@ -688,8 +603,8 @@ static int sja1000_err(struct net_device *dev,
 		if (status & SR_BS) {
 			state = CAN_STATE_BUS_OFF;
 			cf->can_id |= CAN_ERR_BUSOFF;
+			can_bus_off(dev);
 			iDBG(KERN_INFO "%s: BUS OFF\n", dev->name);
-			restart++;
 		} else if (status & SR_ES) {
 			state = CAN_STATE_BUS_WARNING;
 			cf->can_id |= CAN_ERR_BUSOFF;
@@ -702,8 +617,7 @@ static int sja1000_err(struct net_device *dev,
 		iiDBG(KERN_INFO "%s: bus error isrc=0x%02X "
 		      "status=0x%02X\n", dev->name, isrc, status);
 		iDBG(KERN_INFO "%s: BEI #%d# [%d]\n", dev->name, n,
-		     priv->can.can_stats.bus_error -
-		     priv->can.can_stats.bus_error_at_init);
+		     priv->can.can_stats.bus_error);
 		priv->can.can_stats.bus_error++;
 		ecc = priv->read_reg(dev, REG_ECC);
 		iDBG(KERN_INFO "%s: ECC = 0x%02X (%s, %s, %s)\n",
@@ -732,23 +646,6 @@ static int sja1000_err(struct net_device *dev,
 		/* Error occured during transmission? */
 		if ((ecc & ECC_DIR) == 0)
 			cf->data[2] |= CAN_ERR_PROT_TX;
-
-		/* when the bus errors flood the system, */
-		/* restart the controller                */
-		if ((priv->can.can_stats.bus_error_at_init +
-		     MAX_BUS_ERRORS < priv->can.can_stats.bus_error)) {
-			iDBG(KERN_INFO "%s: heavy bus errors\n", dev->name);
-			restart++;
-		}
-#if 1
-		/* don't know, if this is a good idea, */
-		/* but it works fine ...               */
-		if (priv->read_reg(dev, REG_RXERR) > 128) {
-			iDBG(KERN_INFO "%s: RX_ERR > 128\n", dev->name);
-			state = CAN_STATE_BUS_PASSIVE;
-			restart++;
-		}
-#endif
 	}
 	if (isrc & IRQ_EPI) {
 		/* error passive interrupt */
@@ -759,7 +656,6 @@ static int sja1000_err(struct net_device *dev,
 		if (status & SR_ES) {
 			iDBG(KERN_INFO "%s: ERROR PASSIVE\n", dev->name);
 			state = CAN_STATE_BUS_PASSIVE;
-			restart++;
 		} else {
 			iDBG(KERN_INFO "%s: ERROR ACTIVE\n", dev->name);
 			state = CAN_STATE_BUS_WARNING;
@@ -800,12 +696,6 @@ static int sja1000_err(struct net_device *dev,
 	dev->last_rx = jiffies;
 	stats->rx_packets++;
 	stats->rx_bytes += cf->can_dlc;
-
-	if (priv->can.restart_ms > 0 && restart) {
-		iDBG(KERN_INFO "%s: restarting device\n", dev->name);
-		can_restart_on(dev);
-		return restart;
-	}
 
 	return 0;
 }
@@ -919,19 +809,11 @@ static int sja1000_close(struct net_device *dev)
 {
 	struct sja1000_priv *priv = netdev_priv(dev);
 
-	/* set chip into reset mode */
 	set_reset_mode(dev);
-
-	priv->open_time = 0;
-
-	if (priv->timer.expires) {
-		del_timer(&priv->timer);
-		priv->timer.expires = 0;
-	}
-
-	free_irq(dev->irq, (void *)dev);
-
 	netif_stop_queue(dev);
+	priv->open_time = 0;
+	can_close_cleanup(dev);
+	free_irq(dev->irq, (void *)dev);
 
 	return 0;
 }
@@ -973,9 +855,6 @@ int register_sja1000dev(struct net_device *dev)
 
 	if (!sja1000_probe_chip(dev))
 		return -ENODEV;
-
-	init_timer(&priv->timer);
-	priv->timer.expires = 0;
 
 	dev->open = sja1000_open;
 	dev->stop = sja1000_close;

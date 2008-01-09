@@ -205,6 +205,9 @@ struct net_device *alloc_candev(int sizeof_priv)
 	priv->max_sjw = DEFAULT_MAX_SJW;
 	spin_lock_init(&priv->irq_lock);
 
+	init_timer(&priv->timer);
+	priv->timer.expires = 0;
+
 	return dev;
 }
 
@@ -216,6 +219,89 @@ void free_candev(struct net_device *dev)
 }
 
 EXPORT_SYMBOL(free_candev);
+
+/*
+ * CAN bus-off handling
+ * FIXME: we need some synchronization
+ */
+int can_restart_now(struct net_device *dev)
+{
+	struct can_priv *priv = netdev_priv(dev);
+	struct net_device_stats *stats = dev->get_stats(dev);
+	struct sk_buff *skb;
+	struct can_frame *cf;
+	int err;
+
+	/* Cancel restart in progress */
+	if (priv->timer.expires) {
+		del_timer(&priv->timer);
+		priv->timer.expires = 0; /* mark inactive timer */
+	}
+
+	if ((err = priv->do_set_mode(dev, CAN_MODE_START)))
+		return err;
+
+	if (!netif_carrier_ok(dev))
+		netif_carrier_on(dev);
+
+	priv->can_stats.restarts++;
+
+	/* send restart message upstream */
+	skb = dev_alloc_skb(sizeof(struct can_frame));
+	if (skb == NULL)
+		return -ENOMEM;
+	skb->dev = dev;
+	skb->protocol = htons(ETH_P_CAN);
+	cf = (struct can_frame *)skb_put(skb, sizeof(struct can_frame));
+	memset(cf, 0, sizeof(struct can_frame));
+	cf->can_id = CAN_ERR_FLAG | CAN_ERR_RESTARTED;
+	cf->can_dlc = CAN_ERR_DLC;
+
+	netif_rx(skb);
+
+	dev->last_rx = jiffies;
+	stats->rx_packets++;
+	stats->rx_bytes += cf->can_dlc;
+
+	return 0;
+}
+
+static void can_restart_after(unsigned long data)
+{
+	struct net_device *dev = (struct net_device *)data;
+	struct can_priv *priv = netdev_priv(dev);
+
+	priv->timer.expires = 0; /* mark inactive timer */
+	can_restart_now(dev);
+}
+
+void can_bus_off(struct net_device *dev)
+{
+	struct can_priv *priv = netdev_priv(dev);
+
+	netif_carrier_off(dev);
+
+	if (priv->restart_ms > 0 && !priv->timer.expires) {
+
+		priv->timer.function = can_restart_after;
+		priv->timer.data = (unsigned long)dev;
+		priv->timer.expires =
+			jiffies + (priv->restart_ms * HZ) / 1000;
+		add_timer(&priv->timer);
+	}
+}
+EXPORT_SYMBOL(can_bus_off);
+
+void can_close_cleanup(struct net_device *dev)
+{
+	struct can_priv *priv = netdev_priv(dev);
+
+	if (priv->timer.expires) {
+		del_timer(&priv->timer);
+		priv->timer.expires = 0;
+	}
+}
+EXPORT_SYMBOL(can_close_cleanup);
 
 static __init int can_dev_init(void)
 {

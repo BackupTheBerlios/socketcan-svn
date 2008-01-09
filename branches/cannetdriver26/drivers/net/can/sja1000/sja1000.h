@@ -174,7 +174,6 @@ struct sja1000_priv {
 	struct can_priv can;	/* must be the first member! */
 	long open_time;
 	int debug;
-	struct timer_list timer;
 	struct sk_buff *echo_skb;
 	u8 (*read_reg) (struct net_device * dev, int reg);
 	void (*write_reg) (struct net_device * dev, int reg, u8 val);
