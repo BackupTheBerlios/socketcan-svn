@@ -56,5 +56,6 @@ else
 #EXTRA_CFLAGS += -I$(TOPDIR)/drivers/net/can/hal
 
 obj-$(CONFIG_CAN_SJA1000) += sja1000.o
+obj-$(CONFIG_CAN_IXXAT_PCI) += ixxat_pci.o
 
 endif

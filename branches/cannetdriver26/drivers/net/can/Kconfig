@@ -112,4 +112,12 @@ config CAN_H7202
 	---help---
 	  This is a driver for the hynix h7202 can controller.
 
+config CAN_IXXAT_PCI
+	tristate "IXXAT PCI Card"
+	depends on PCI && CAN_SJA1000
+	help
+
+	This driver is for the IXXAT PC-I 04/PCI card (1 or 2 channel)
+	from the IXXAT Automation GmbH (http://www.ixxat.de).
+
 endmenu
