@@ -157,101 +157,6 @@ int can_calc_bit_time(struct can_priv *can, u32 baudrate,
 }
 EXPORT_SYMBOL(can_calc_bit_time);
 
-static int can_ioctl(struct net_device *dev, struct ifreq *ifr, int cmd)
-{
-	struct can_priv *can = netdev_priv(dev);
-	struct can_bittime *bt = (struct can_bittime *)&ifr->ifr_ifru;
-	ulong *baudrate = (ulong *) & ifr->ifr_ifru;
-	int err = -EOPNOTSUPP;
-
-	dev_dbg(ND2D(dev), "(%s) 0x%08x %p\n", __FUNCTION__, cmd,
-		&ifr->ifr_ifru);
-
-	switch (cmd) {
-	case SIOCSCANBAUDRATE:
-		if (can->do_set_bit_time) {
-			struct can_bittime bit_time;
-			err = can_calc_bit_time(can, *baudrate, &bit_time.std);
-			if (err)
-				break;
-			bit_time.type = CAN_BITTIME_STD;
-			err = can->do_set_bit_time(dev, &bit_time);
-			if (!err) {
-				can->baudrate = *baudrate;
-				can->bit_time = bit_time;
-			}
-		}
-		break;
-	case SIOCGCANBAUDRATE:
-		*baudrate = can->baudrate;
-		err = 0;
-		break;
-	case SIOCSCANCUSTOMBITTIME:
-		if (can->do_set_bit_time) {
-			err = can->do_set_bit_time(dev, bt);
-			if (!err) {
-				can->bit_time = *bt;
-				if (bt->type == CAN_BITTIME_STD && bt->std.brp) {
-					can->baudrate = can->can_sys_clock /
-						(bt->std.brp *
-						 (1 + bt->std.prop_seg +
-						  bt->std.phase_seg1 +
-						  bt->std.phase_seg2));
-				} else
-					can->baudrate = CAN_BAUDRATE_UNKNOWN;
-			}
-		}
-		break;
-	case SIOCGCANCUSTOMBITTIME:
-		*bt = can->bit_time;
-		err = 0;
-		break;
-	case SIOCSCANMODE:
-		if (can->do_set_mode) {
-			can_mode_t mode = *((can_mode_t *) (&ifr->ifr_ifru));
-			if (mode == CAN_MODE_START &&
-			    can->baudrate == CAN_BAUDRATE_UNCONFIGURED) {
-				dev_info(ND2D(dev),
-					 "Impossible to start on UNKNOWN speed\n");
-				err = EINVAL;
-			} else
-				return can->do_set_mode(dev, mode);
-		}
-		break;
-	case SIOCGCANMODE:
-		*((can_mode_t *) (&ifr->ifr_ifru)) = can->mode;
-		err = 0;
-		break;
-	case SIOCSCANCTRLMODE:
-		if (can->do_set_ctrlmode) {
-			can_ctrlmode_t ctrlmode =
-			    *((can_ctrlmode_t *) (&ifr->ifr_ifru));
-			return can->do_set_ctrlmode(dev, ctrlmode);
-		}
-		break;
-	case SIOCGCANCTRLMODE:
-		*((can_ctrlmode_t *) (&ifr->ifr_ifru)) = can->ctrlmode;
-		err = 0;
-		break;
-	case SIOCSCANFILTER:
-		break;
-	case SIOCGCANFILTER:
-		break;
-	case SIOCGCANSTATE:
-		if (can->do_get_state)
-			return can->do_get_state(dev,
-						 (can_state_t *) (&ifr->
-								  ifr_ifru));
-		break;
-	case SIOCGCANSTATS:
-		*((struct can_device_stats *)(&ifr->ifr_ifru)) = can->can_stats;
-		err = 0;
-		break;
-	}
-
-	return err;
-}
-
 #if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,23)
 static struct net_device_stats *can_get_stats(struct net_device *dev)
 {
@@ -265,7 +170,6 @@ static void can_setup(struct net_device *dev)
 {
 	dev->type = ARPHRD_CAN;
 	dev->mtu = sizeof(struct can_frame);
-	dev->do_ioctl = can_ioctl;
 	dev->hard_header_len = 0;
 	dev->addr_len = 0;
 	dev->tx_queue_len = 10;

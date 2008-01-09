@@ -15,41 +15,15 @@
 
 #include <linux/sockios.h>
 
-
-/* max. 16 private ioctls */
-
-#define SIOCSCANBAUDRATE	(SIOCDEVPRIVATE+0)
-#define SIOCGCANBAUDRATE	(SIOCDEVPRIVATE+1)
-
-#define SIOCSCANCUSTOMBITTIME   (SIOCDEVPRIVATE+2)
-#define SIOCGCANCUSTOMBITTIME   (SIOCDEVPRIVATE+3)
-
-#define SIOCSCANMODE		(SIOCDEVPRIVATE+4)
-#define SIOCGCANMODE		(SIOCDEVPRIVATE+5)
-
-#define SIOCSCANCTRLMODE	(SIOCDEVPRIVATE+6)
-#define SIOCGCANCTRLMODE	(SIOCDEVPRIVATE+7)
-
-#define SIOCSCANFILTER		(SIOCDEVPRIVATE+8)
-#define SIOCGCANFILTER		(SIOCDEVPRIVATE+9)
-
-#define SIOCGCANSTATE		(SIOCDEVPRIVATE+10)
-#define SIOCGCANSTATS		(SIOCDEVPRIVATE+11)
-
-#define SIOCSCANERRORCONFIG	(SIOCDEVPRIVATE+12)
-#define SIOCGCANERRORCONFIG	(SIOCDEVPRIVATE+13)
-
-/* parameters for ioctls */
-
-/* SIOC[SG]CANBAUDRATE */
-/* baudrate for CAN-controller in bits per second. */
-/* 0 = Scan for baudrate (Autobaud) */
-
+/*
+ * CAN Baudrate for CAN-controller in bits per second.
+ * 0 = Scan for baudrate (Autobaud)
+ */
 typedef __u32 can_baudrate_t;
 
-
-/* SIOC[SG]CANCUSTOMBITTIME */
-
+/*
+ * CAN custom bit time
+ */
 typedef enum CAN_BITTIME_TYPE {
 	CAN_BITTIME_STD,
 	CAN_BITTIME_BTR
@@ -83,25 +57,26 @@ struct can_bittime {
 #define CAN_BAUDRATE_UNCONFIGURED	((__u32) 0xFFFFFFFFU)
 #define CAN_BAUDRATE_UNKNOWN		0
 
-/* SIOC[SG]CANMODE */
-
+/*
+ * CAN mode
+ */
 typedef __u32 can_mode_t;
 
 #define CAN_MODE_STOP	0
 #define CAN_MODE_START	1
 #define CAN_MODE_SLEEP	2
 
-
-/* SIOC[SG]CANCTRLMODE */
-
+/*
+ * CAN controller mode
+ */
 typedef __u32 can_ctrlmode_t;
 
 #define CAN_CTRLMODE_LOOPBACK   0x1
 #define CAN_CTRLMODE_LISTENONLY 0x2
 
-
-/* SIOCGCANSTATE */
-
+/*
+ * CAN operational and error states
+ */
 typedef __u32 can_state_t;
 
 #define CAN_STATE_ACTIVE		0
@@ -111,9 +86,9 @@ typedef __u32 can_state_t;
 #define CAN_STATE_STOPPED		5
 #define CAN_STATE_SLEEPING		6
 
-
-/* SIOCGCANSTATS */
-
+/*
+ * CAN device statistics
+ */
 struct can_device_stats {
 	int error_warning;
 	int data_overrun;
