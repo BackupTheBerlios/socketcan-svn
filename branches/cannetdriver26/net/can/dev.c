@@ -221,6 +221,87 @@ void free_candev(struct net_device *dev)
 EXPORT_SYMBOL(free_candev);
 
 /*
+ * Local echo of CAN messages
+ *
+ * CAN network devices *should* support a local echo functionality
+ * (see Documentation/networking/can.txt). To test the handling of CAN
+ * interfaces that do not support the local echo both driver types are
+ * implemented. In the case that the driver does not support the echo
+ * the IFF_ECHO remains clear in dev->flags. This causes the PF_CAN core
+ * to perform the echo as a fallback solution.
+ */
+
+void can_flush_echo_skb(struct net_device *dev)
+{
+	struct can_priv *priv = netdev_priv(dev);
+	int i;
+
+	for (i = 0; i > CAN_ECHO_SKB_MAX; i++) {
+		if (priv->echo_skb[i]) {
+			kfree_skb(priv->echo_skb[i]);
+			priv->echo_skb[i] = NULL;
+		}
+	}
+}
+
+int can_put_echo_skb(struct sk_buff *skb, struct net_device *dev, int idx)
+{
+	struct can_priv *priv = netdev_priv(dev);
+
+	/* set flag whether this packet has to be looped back */
+	if (!priv->echo || skb->pkt_type != PACKET_LOOPBACK) {
+		kfree_skb(skb);
+		return 0;
+	}
+
+	if (!priv->echo_skb[idx]) {
+		struct sock *srcsk = skb->sk;
+
+		if (atomic_read(&skb->users) != 1) {
+			struct sk_buff *old_skb = skb;
+
+			skb = skb_clone(old_skb, GFP_ATOMIC);
+			kfree_skb(old_skb);
+			if (!skb) {
+				return 0;
+			}
+		} else
+			skb_orphan(skb);
+
+		skb->sk = srcsk;
+
+		/* make settings for echo to reduce code in irq context */
+		skb->protocol = htons(ETH_P_CAN);
+		skb->pkt_type = PACKET_BROADCAST;
+		skb->ip_summed = CHECKSUM_UNNECESSARY;
+		skb->dev = dev;
+
+		/* save this skb for tx interrupt echo handling */
+		priv->echo_skb[idx] = skb;
+
+	} else {
+		/* locking problem with netif_stop_queue() ?? */
+		printk(KERN_ERR "%s: %s: occupied echo_skb!\n",
+		       dev->name, __FUNCTION__);
+		kfree_skb(skb);
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL(can_put_echo_skb);
+
+void can_get_echo_skb(struct net_device *dev, int idx)
+{
+	struct can_priv *priv = netdev_priv(dev);
+
+	if (priv->echo && priv->echo_skb[idx]) {
+		netif_rx(priv->echo_skb[idx]);
+		priv->echo_skb[idx] = NULL;
+	}
+}
+EXPORT_SYMBOL(can_get_echo_skb);
+
+/*
  * CAN bus-off handling
  * FIXME: we need some synchronization
  */
@@ -237,6 +318,8 @@ int can_restart_now(struct net_device *dev)
 		del_timer(&priv->timer);
 		priv->timer.expires = 0; /* mark inactive timer */
 	}
+
+	can_flush_echo_skb(dev);
 
 	if ((err = priv->do_set_mode(dev, CAN_MODE_START)))
 		return err;
@@ -300,6 +383,8 @@ void can_close_cleanup(struct net_device *dev)
 		del_timer(&priv->timer);
 		priv->timer.expires = 0;
 	}
+
+	can_flush_echo_skb(dev);
 }
 EXPORT_SYMBOL(can_close_cleanup);
 

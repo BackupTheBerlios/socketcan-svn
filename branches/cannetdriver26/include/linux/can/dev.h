@@ -17,6 +17,8 @@
 #include <linux/can/error.h>
 #include <linux/can/ioctl.h>
 
+#define CAN_ECHO_SKB_MAX  4
+
 struct can_priv {
 #if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,23)
 	struct net_device_stats net_stats;
@@ -54,6 +56,9 @@ struct can_priv {
 	int restart_ms;
 	struct timer_list timer;
 
+	int echo;
+	struct sk_buff *echo_skb[CAN_ECHO_SKB_MAX];
+
 	int (*do_set_bittime)(struct net_device * dev,
 			      struct can_bittime * br);
 	int (*do_get_state)(struct net_device * dev, u32* state);
@@ -75,6 +80,11 @@ int can_calc_bittime(struct can_priv *can, u32 bitrate,
 		     struct can_bittime_std *bittime);
 
 void can_bus_off(struct net_device *dev);
+
+void can_close_cleanup(struct net_device *dev);
+
+int can_put_echo_skb(struct sk_buff *skb, struct net_device *dev, int idx);
+void can_get_echo_skb(struct net_device *dev, int idx);
 
 void can_close_cleanup(struct net_device *dev);
 

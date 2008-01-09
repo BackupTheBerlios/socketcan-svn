@@ -89,7 +89,7 @@ MODULE_DESCRIPTION("Socketcan " CHIP_NAME " network device driver");
 #endif
 
 /* driver and version information */
-static const char *drv_name = "SJA1000DEV";
+static const char *drv_name = "SJA1000";
 static const char *drv_version = "0.2.0";
 static const char *drv_reldate = "2007-10-25";
 
@@ -149,20 +149,6 @@ MODULE_PARM_DESC(debug, "Set debug mask (default: 0)");
 MODULE_PARM_DESC(echo, "Echo sent frames. (default 1)");
 MODULE_PARM_DESC(restart_ms, "Restart time after bus-off in ms(default 0)");
 
-/*
- * CAN network devices *should* support a local echo functionality
- * (see Documentation/networking/can.txt). To test the handling of CAN
- * interfaces that do not support the local echo both driver types are
- * implemented inside this sja1000 driver. In the case that the driver does
- * not support the echo the IFF_ECHO remains clear in dev->flags.
- * This causes the PF_CAN core to perform the echo as a fallback solution.
- */
-
-/* function declarations */
-
-static void chipset_init(struct net_device *dev, int wake);
-static void chipset_init_trx(struct net_device *dev);
-int set_reset_mode(struct net_device *dev);
 
 static int sja1000_probe_chip(struct net_device *dev)
 {
@@ -242,6 +228,25 @@ static int set_normal_mode(struct net_device *dev)
 
 }
 
+static void sja1000_start(struct net_device *dev)
+{
+	struct sja1000_priv *priv = netdev_priv(dev);
+
+	iDBG(KERN_INFO "%s: %s()\n", dev->name, __FUNCTION__);
+
+	/* leave reset mode */
+	if (priv->can.state != CAN_STATE_STOPPED)
+		set_reset_mode(dev);
+
+	/* Clear error counters and error code capture */
+	priv->write_reg(dev, REG_TXERR, 0x0);
+	priv->write_reg(dev, REG_RXERR, 0x0);
+	priv->read_reg(dev, REG_ECC);
+
+	/* leave reset mode */
+	set_normal_mode(dev);
+}
+
 static int sja1000_set_mode(struct net_device *dev, can_mode_t mode)
 {
 	struct sja1000_priv *priv = netdev_priv(dev);
@@ -251,7 +256,10 @@ static int sja1000_set_mode(struct net_device *dev, can_mode_t mode)
 		DBG("%s: CAN_MODE_START requested\n", __FUNCTION__);
 		if (!priv->open_time)
 			return -EINVAL;
-		chipset_init_trx(dev);
+
+		sja1000_start(dev);
+		if (netif_queue_stopped(dev))
+			netif_wake_queue(dev);
 		break;
 
 	default:
@@ -340,7 +348,7 @@ static int sja1000_set_bittime(struct net_device *dev, struct can_bittime *bt)
  *   - enable interrupts
  *   - start operating mode
  */
-static void chipset_init_regs(struct net_device *dev)
+static void chipset_init(struct net_device *dev)
 {
 	struct sja1000_priv *priv = netdev_priv(dev);
 	struct can_bittime bt;
@@ -372,40 +380,6 @@ static void chipset_init_regs(struct net_device *dev)
 	priv->write_reg(dev, REG_OCR, priv->ocr | OCR_MODE_NORMAL);
 }
 
-static void chipset_init(struct net_device *dev, int wake)
-{
-	struct sja1000_priv *priv = netdev_priv(dev);
-
-	chipset_init_trx(dev);
-
-	if ((wake) && netif_queue_stopped(dev)) {
-		if (priv->echo_skb) {	/* pending echo? */
-			kfree_skb(priv->echo_skb);
-			priv->echo_skb = NULL;
-		}
-		netif_wake_queue(dev);
-	}
-}
-
-static void chipset_init_trx(struct net_device *dev)
-{
-	struct sja1000_priv *priv = netdev_priv(dev);
-
-	iDBG(KERN_INFO "%s: %s()\n", dev->name, __FUNCTION__);
-
-	/* leave reset mode */
-	if (priv->can.state != CAN_STATE_STOPPED)
-		set_reset_mode(dev);
-
-	/* Clear error counters and error code capture */
-	priv->write_reg(dev, REG_TXERR, 0x0);
-	priv->write_reg(dev, REG_RXERR, 0x0);
-	priv->read_reg(dev, REG_ECC);
-
-	/* leave reset mode */
-	set_normal_mode(dev);
-}
-
 /*
  * transmit a CAN message
  * message layout in the sk_buff should be like this:
@@ -421,7 +395,6 @@ static int sja1000_start_xmit(struct sk_buff *skb, struct net_device *dev)
 	uint8_t dlc;
 	canid_t id;
 	uint8_t dreg;
-	int loop;
 	int i;
 
 	netif_stop_queue(dev);
@@ -457,50 +430,7 @@ static int sja1000_start_xmit(struct sk_buff *skb, struct net_device *dev)
 
 	dev->trans_start = jiffies;
 
-	/* set flag whether this packet has to be looped back */
-	loop = skb->pkt_type == PACKET_LOOPBACK;
-
-	if (!echo || !loop) {
-		kfree_skb(skb);
-		return 0;
-	}
-
-	if (!priv->echo_skb) {
-		struct sock *srcsk = skb->sk;
-
-		if (atomic_read(&skb->users) != 1) {
-			struct sk_buff *old_skb = skb;
-
-			skb = skb_clone(old_skb, GFP_ATOMIC);
-			DBG(KERN_INFO "%s: %s: freeing old skbuff %p, "
-			    "using new skbuff %p\n",
-			    dev->name, __FUNCTION__, old_skb, skb);
-			kfree_skb(old_skb);
-			if (!skb) {
-				return 0;
-			}
-		} else
-			skb_orphan(skb);
-
-		skb->sk = srcsk;
-
-		/* make settings for echo to reduce code in irq context */
-		skb->protocol = htons(ETH_P_CAN);
-		skb->pkt_type = PACKET_BROADCAST;
-		skb->ip_summed = CHECKSUM_UNNECESSARY;
-		skb->dev = dev;
-
-		/* save this skb for tx interrupt echo handling */
-		priv->echo_skb = skb;
-
-	} else {
-		/* locking problem with netif_stop_queue() ?? */
-		printk(KERN_ERR "%s: %s: occupied echo_skb!\n",
-		       dev->name, __FUNCTION__);
-		kfree_skb(skb);
-	}
-
-	return 0;
+	return can_put_echo_skb(skb, dev, 0);
 }
 
 static void sja1000_rx(struct net_device *dev)
@@ -738,23 +668,16 @@ static irqreturn_t sja1000_interrupt(int irq, void *dev_id)
 		if (isrc & IRQ_TI) {
 			/* transmission complete interrupt */
 			stats->tx_packets++;
-
-			if (echo && priv->echo_skb) {
-				netif_rx(priv->echo_skb);
-				priv->echo_skb = NULL;
-			}
-
+			can_get_echo_skb(dev, 0);
 			netif_wake_queue(dev);
 		}
 		if (isrc & IRQ_RI) {
 			/* receive interrupt */
-
 			while (status & SR_RBS) {
 				sja1000_rx(dev);
 				status = priv->read_reg(dev, REG_SR);
 			}
 		}
-
 		if (isrc & (IRQ_DOI | IRQ_EI | IRQ_BEI | IRQ_EPI | IRQ_ALI)) {
 			/* error interrupt */
 			if (sja1000_err(dev, isrc, status, n))
@@ -796,8 +719,8 @@ static int sja1000_open(struct net_device *dev)
 	memset(&priv->can.net_stats, 0, sizeof(priv->can.net_stats));
 #endif
 
-	/* init chip */
-	chipset_init(dev, 0);
+	/* init and start chi */
+	sja1000_start(dev);
 	priv->open_time = jiffies;
 
 	netif_start_queue(dev);
@@ -874,7 +797,7 @@ int register_sja1000dev(struct net_device *dev)
 	}
 
 	set_reset_mode(dev);
-	chipset_init_regs(dev);
+	chipset_init(dev);
 	return 0;
 }
 EXPORT_SYMBOL(register_sja1000dev);
