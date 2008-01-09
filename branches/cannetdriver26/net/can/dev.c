@@ -21,8 +21,11 @@
 #include <linux/module.h>
 #include <linux/netdevice.h>
 #include <linux/if_arp.h>
+#include <linux/rtnetlink.h>
 #include <linux/can.h>
 #include <linux/can/dev.h>
+
+#include "sysfs.h"
 
 MODULE_DESCRIPTION("CAN netdevice library");
 MODULE_LICENSE("GPL v2");
@@ -213,3 +216,15 @@ void free_candev(struct net_device *dev)
 }
 
 EXPORT_SYMBOL(free_candev);
+
+static __init int can_dev_init(void)
+{
+	return can_sysfs_init();
+}
+module_init(can_dev_init);
+
+static __exit void can_dev_exit(void)
+{
+	can_sysfs_exit();
+}
+module_exit(can_dev_exit);
