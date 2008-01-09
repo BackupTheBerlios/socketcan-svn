@@ -16,10 +16,10 @@
 #include <linux/sockios.h>
 
 /*
- * CAN Baudrate for CAN-controller in bits per second.
- * 0 = Scan for baudrate (Autobaud)
+ * CAN baudrate
  */
-typedef __u32 can_baudrate_t;
+#define CAN_BAUDRATE_UNCONFIGURED	((__u32) 0xFFFFFFFFU)
+#define CAN_BAUDRATE_UNKNOWN		0
 
 /*
  * CAN custom bit time
@@ -54,37 +54,32 @@ struct can_bittime {
 	};
 };
 
-#define CAN_BAUDRATE_UNCONFIGURED	((__u32) 0xFFFFFFFFU)
-#define CAN_BAUDRATE_UNKNOWN		0
-
 /*
  * CAN mode
  */
-typedef __u32 can_mode_t;
-
-#define CAN_MODE_STOP	0
-#define CAN_MODE_START	1
-#define CAN_MODE_SLEEP	2
+typedef enum {
+	CAN_MODE_STOP = 0,
+	CAN_MODE_START,
+	CAN_MODE_SLEEP
+} can_mode_t;
 
 /*
  * CAN controller mode
  */
-typedef __u32 can_ctrlmode_t;
-
 #define CAN_CTRLMODE_LOOPBACK   0x1
 #define CAN_CTRLMODE_LISTENONLY 0x2
 
 /*
  * CAN operational and error states
  */
-typedef __u32 can_state_t;
-
-#define CAN_STATE_ACTIVE		0
-#define CAN_STATE_BUS_WARNING		1
-#define CAN_STATE_BUS_PASSIVE		2
-#define CAN_STATE_BUS_OFF		3
-#define CAN_STATE_STOPPED		5
-#define CAN_STATE_SLEEPING		6
+typedef enum {
+	CAN_STATE_ACTIVE = 0,
+	CAN_STATE_BUS_WARNING,
+	CAN_STATE_BUS_PASSIVE,
+	CAN_STATE_BUS_OFF,
+	CAN_STATE_STOPPED,
+	CAN_STATE_SLEEPING
+} can_state_t;
 
 /*
  * CAN device statistics
