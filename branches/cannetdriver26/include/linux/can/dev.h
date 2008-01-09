@@ -41,7 +41,7 @@ struct can_priv {
 	u8 max_sjw;
 
 	u32 bitrate;
-	struct can_bittime bit_time;
+	struct can_bittime bittime;
 
 	spinlock_t irq_lock;
 	/* Please hold this lock when touching net_stats/can_stats */
@@ -51,8 +51,8 @@ struct can_priv {
 	can_mode_t mode;
 	u32 ctrlmode;
 
-	int (*do_set_bit_time)(struct net_device * dev,
-			       struct can_bittime * br);
+	int (*do_set_bittime)(struct net_device * dev,
+			      struct can_bittime * br);
 	int (*do_get_state)(struct net_device * dev, u32* state);
 	int (*do_set_mode)(struct net_device * dev, u32 mode);
 	int (*do_set_ctrlmode)(struct net_device * dev, u32 ctrlmode);
@@ -68,7 +68,7 @@ struct can_priv {
 struct net_device *alloc_candev(int sizeof_priv);
 void free_candev(struct net_device *dev);
 
-int can_calc_bit_time(struct can_priv *can, u32 bitrate,
-		      struct can_bittime_std *bit_time);
+int can_calc_bittime(struct can_priv *can, u32 bitrate,
+		     struct can_bittime_std *bittime);
 
 #endif /* CAN_DEVICE_H */

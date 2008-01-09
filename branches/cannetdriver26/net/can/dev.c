@@ -40,25 +40,25 @@ MODULE_AUTHOR("Marc Kleine-Budde <mkl@pengutronix.de>, "
  *
  *  Parameters:
  *  [in]
- *    bit_time_nsec - expected bit time in nanosecs
+ *    bittime_nsec - expected bit time in nanosecs
  *
  *  [out]
- *    bit_time      - calculated time segments, for meaning of
- * 		      each field read CAN standard.
+ *    bittime      - calculated time segments, for meaning of
+ * 		     each field read CAN standard.
  */
 
 #define DEFAULT_MAX_BRP	64U
 #define DEFAULT_MAX_SJW	4U
 
 /* All below values in tq units */
-#define MAX_BIT_TIME	25U
-#define MIN_BIT_TIME	8U
+#define MAX_BITTIME	25U
+#define MIN_BITTIME	8U
 #define MAX_PROP_SEG	8U
 #define MAX_PHASE_SEG1	8U
 #define MAX_PHASE_SEG2	8U
 
-int can_calc_bit_time(struct can_priv *can, u32 bitrate,
-		      struct can_bittime_std *bit_time)
+int can_calc_bittime(struct can_priv *can, u32 bitrate,
+		     struct can_bittime_std *bittime)
 {
 	int best_error = -1;	/* Ariphmetic error */
 	int df, best_df = -1;	/* oscillator's tolerance range,
@@ -76,13 +76,13 @@ int can_calc_bit_time(struct can_priv *can, u32 bitrate,
 	do_div(tmp, bitrate);
 	brp_expected = (u32) tmp;
 
-	brp_min = brp_expected / (1000 * MAX_BIT_TIME);
+	brp_min = brp_expected / (1000 * MAX_BITTIME);
 	if (brp_min == 0)
 		brp_min = 1;
 	if (brp_min > can->max_brp)
 		return -ERANGE;
 
-	brp_max = (brp_expected + 500 * MIN_BIT_TIME) / (1000 * MIN_BIT_TIME);
+	brp_max = (brp_expected + 500 * MIN_BITTIME) / (1000 * MIN_BITTIME);
 	if (brp_max == 0)
 		brp_max = 1;
 	if (brp_max > can->max_brp)
@@ -90,10 +90,10 @@ int can_calc_bit_time(struct can_priv *can, u32 bitrate,
 
 	for (brp = brp_min; brp <= brp_max; brp++) {
 		quanta = brp_expected / (brp * 1000);
-		if (quanta < MAX_BIT_TIME
+		if (quanta < MAX_BITTIME
 		    && quanta * brp * 1000 != brp_expected)
 			quanta++;
-		if (quanta < MIN_BIT_TIME || quanta > MAX_BIT_TIME)
+		if (quanta < MIN_BITTIME || quanta > MAX_BITTIME)
 			continue;
 
 		phase_seg2 = min((quanta - 3) / 2, MAX_PHASE_SEG2);
@@ -133,18 +133,18 @@ int can_calc_bit_time(struct can_priv *can, u32 bitrate,
 						continue;
 
 					if (error == best_error
-					    && prop_seg < bit_time->prop_seg)
+					    && prop_seg < bittime->prop_seg)
 						continue;
 
 					best_error = error;
 					best_df = df;
-					bit_time->brp = brp;
-					bit_time->prop_seg = prop_seg;
-					bit_time->phase_seg1 = phase_seg1;
-					bit_time->phase_seg2 = phase_seg2;
-					bit_time->sjw = sjw;
-					bit_time->sam =
-						(bit_time->phase_seg1 > 3);
+					bittime->brp = brp;
+					bittime->prop_seg = prop_seg;
+					bittime->phase_seg1 = phase_seg1;
+					bittime->phase_seg2 = phase_seg2;
+					bittime->sjw = sjw;
+					bittime->sam =
+						(bittime->phase_seg1 > 3);
 				}
 			}
 		}
@@ -155,7 +155,7 @@ int can_calc_bit_time(struct can_priv *can, u32 bitrate,
 		return -EDOM;
 	return 0;
 }
-EXPORT_SYMBOL(can_calc_bit_time);
+EXPORT_SYMBOL(can_calc_bittime);
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,23)
 static struct net_device_stats *can_get_stats(struct net_device *dev)

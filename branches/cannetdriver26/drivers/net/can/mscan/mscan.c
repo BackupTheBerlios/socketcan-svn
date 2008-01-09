@@ -550,8 +550,7 @@ static int mscan_do_set_mode(struct net_device *dev, can_mode_t mode)
 	return 0;
 }
 
-static int mscan_do_set_bit_time(struct net_device *dev,
-				 struct can_bittime *bt)
+static int mscan_do_set_bittime(struct net_device *dev, struct can_bittime *bt)
 {
 	struct mscan_priv *priv = netdev_priv(dev);
 	struct mscan_regs *regs = (struct mscan_regs *)dev->base_addr;
@@ -698,7 +697,7 @@ struct net_device *alloc_mscandev(void)
 	dev->poll = mscan_rx_poll;
 	dev->weight = 8;
 
-	priv->can.do_set_bit_time = mscan_do_set_bit_time;
+	priv->can.do_set_bittime = mscan_do_set_bittime;
 	priv->can.do_set_mode = mscan_do_set_mode;
 
 	for (i = 0; i < TX_QUEUE_SIZE; i++)
