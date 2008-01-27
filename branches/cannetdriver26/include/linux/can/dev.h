@@ -55,7 +55,6 @@ struct can_priv {
 	int restart_ms;
 	struct timer_list timer;
 
-	int echo;
 	struct sk_buff *echo_skb[CAN_ECHO_SKB_MAX];
 
 	int (*do_set_bittime)(struct net_device * dev,
@@ -72,9 +71,14 @@ struct can_priv {
 #define ND2D(_ndev)	(_ndev->dev.parent)
 #endif
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,25)
+#define IFF_ECHO IFF_LOOPBACK
+#endif
+
 struct net_device *alloc_candev(int sizeof_priv);
 void free_candev(struct net_device *dev);
 
+int can_restart_now(struct net_device *dev);
 int can_set_bitrate(struct net_device *dev, u32 bitrate);
 
 void can_bus_off(struct net_device *dev);

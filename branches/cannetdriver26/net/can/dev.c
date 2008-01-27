@@ -32,6 +32,13 @@ MODULE_LICENSE("GPL v2");
 MODULE_AUTHOR("Marc Kleine-Budde <mkl@pengutronix.de>, "
 	      "Andrey Volkov <avolkov@varma-el.com>");
 
+static int restart_ms = 0;
+
+module_param(restart_ms, int, S_IRUGO | S_IWUSR);
+
+MODULE_PARM_DESC(restart_ms, "Restart time after bus-off in ms (default 0)");
+
+
 /*
  * Abstract:
  *   Bit rate calculated with next formula:
@@ -226,6 +233,8 @@ struct net_device *alloc_candev(int sizeof_priv)
 
 	priv = netdev_priv(dev);
 
+	/* Default values can be overwritten by the device driver */
+	priv->restart_ms = restart_ms;
 	priv->bitrate = CAN_BITRATE_UNCONFIGURED;
 	priv->state = CAN_STATE_STOPPED;
 	priv->max_brp = DEFAULT_MAX_BRP;
@@ -261,12 +270,19 @@ EXPORT_SYMBOL(free_candev);
 void can_flush_echo_skb(struct net_device *dev)
 {
 	struct can_priv *priv = netdev_priv(dev);
+#ifdef FIXME
+	struct net_device_stats *stats = dev->get_stats(dev);
+#endif
 	int i;
 
-	for (i = 0; i > CAN_ECHO_SKB_MAX; i++) {
+	for (i = 0; i < CAN_ECHO_SKB_MAX; i++) {
 		if (priv->echo_skb[i]) {
 			kfree_skb(priv->echo_skb[i]);
 			priv->echo_skb[i] = NULL;
+#ifdef FIXME
+			stats->tx_dropped++;
+			stats->tx_aborted_errors++;
+#endif
 		}
 	}
 }
@@ -276,7 +292,7 @@ int can_put_echo_skb(struct sk_buff *skb, struct net_device *dev, int idx)
 	struct can_priv *priv = netdev_priv(dev);
 
 	/* set flag whether this packet has to be looped back */
-	if (!priv->echo || skb->pkt_type != PACKET_LOOPBACK) {
+	if (!(dev->flags & IFF_ECHO) || skb->pkt_type != PACKET_LOOPBACK) {
 		kfree_skb(skb);
 		return 0;
 	}
@@ -305,7 +321,6 @@ int can_put_echo_skb(struct sk_buff *skb, struct net_device *dev, int idx)
 
 		/* save this skb for tx interrupt echo handling */
 		priv->echo_skb[idx] = skb;
-
 	} else {
 		/* locking problem with netif_stop_queue() ?? */
 		printk(KERN_ERR "%s: %s: occupied echo_skb!\n",
@@ -321,7 +336,7 @@ void can_get_echo_skb(struct net_device *dev, int idx)
 {
 	struct can_priv *priv = netdev_priv(dev);
 
-	if (priv->echo && priv->echo_skb[idx]) {
+	if ((dev->flags & IFF_ECHO) && priv->echo_skb[idx]) {
 		netif_rx(priv->echo_skb[idx]);
 		priv->echo_skb[idx] = NULL;
 	}
@@ -340,6 +355,9 @@ int can_restart_now(struct net_device *dev)
 	struct can_frame *cf;
 	int err;
 
+	if (netif_carrier_ok(dev))
+		netif_carrier_off(dev);
+
 	/* Cancel restart in progress */
 	if (priv->timer.expires) {
 		del_timer(&priv->timer);
@@ -351,8 +369,7 @@ int can_restart_now(struct net_device *dev)
 	if ((err = priv->do_set_mode(dev, CAN_MODE_START)))
 		return err;
 
-	if (!netif_carrier_ok(dev))
-		netif_carrier_on(dev);
+	netif_carrier_on(dev);
 
 	priv->can_stats.restarts++;
 

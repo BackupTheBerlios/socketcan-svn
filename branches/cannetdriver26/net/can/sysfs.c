@@ -152,6 +152,21 @@ static int can_get_restart_ms(struct net_device *dev, int *ms)
 	return 0;
 }
 
+static int can_set_echo(struct net_device *dev, int on)
+{
+	if (on)
+		dev->flags |= IFF_ECHO;
+	else
+		dev->flags &= ~IFF_ECHO;
+	return 0;
+}
+
+static int can_get_echo(struct net_device *dev, int *on)
+{
+	*on = dev->flags & IFF_ECHO ? 1 : 0;
+	return 0;
+}
+
 /*
  * SYSFS access functions and attributes.
  * Use same locking as net/core/net-sysfs.c
@@ -202,6 +217,7 @@ static DEVICE_ATTR(_name, S_IRUGO | S_IWUSR, 				\
 CAN_ATTR(can_bitrate, bitrate, u32, "%d");
 CAN_ATTR(can_restart_ms, restart_ms, int, "%d");
 CAN_ATTR(can_clock, clock, u32, "%d");
+CAN_ATTR(can_echo, echo, int, "%d");
 
 #define CAN_STATS_ATTR(_name)						\
 static ssize_t can_stats_show_##_name(struct device *dev,		\
@@ -432,6 +448,7 @@ void can_create_sysfs(struct net_device *dev)
 	CAN_CREATE_FILE(dev, can_state);
 	CAN_CREATE_FILE(dev, can_restart_ms);
 	CAN_CREATE_FILE(dev, can_clock);
+	CAN_CREATE_FILE(dev, can_echo);
 
         err = sysfs_create_group(&(dev->dev.kobj), &can_stats_group);
         if (err) {
@@ -448,6 +465,7 @@ void can_remove_sysfs(struct net_device *dev)
 	CAN_REMOVE_FILE(dev, can_ctrlmode);
 	CAN_REMOVE_FILE(dev, can_state);
 	CAN_REMOVE_FILE(dev, can_clock);
+	CAN_REMOVE_FILE(dev, can_echo);
 
         sysfs_remove_group(&(dev->dev.kobj), &can_stats_group);
 }

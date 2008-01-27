@@ -715,6 +715,8 @@ struct net_device *alloc_mscandev(void)
 	dev->hard_start_xmit = mscan_hard_start_xmit;
 	dev->tx_timeout = mscan_tx_timeout;
 
+	dev->flags |= IFF_ECHO;	/* we support local echo */
+
 #if LINUX_VERSION_CODE > KERNEL_VERSION(2,6,23)
 	priv->dev = dev;
 	netif_napi_add(dev, &priv->napi, mscan_rx_poll, 8);

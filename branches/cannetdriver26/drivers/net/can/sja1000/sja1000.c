@@ -138,16 +138,10 @@ static const char *ecc_types[] = {
 #endif
 
 static int debug = 0;
-static int echo = 1;
-static int restart_ms = 0;
 
 module_param(debug, int, S_IRUGO | S_IWUSR);
-module_param(echo, int, S_IRUGO);
-module_param(restart_ms, int, S_IRUGO);
 
 MODULE_PARM_DESC(debug, "Set debug mask (default: 0)");
-MODULE_PARM_DESC(echo, "Echo sent frames. (default 1)");
-MODULE_PARM_DESC(restart_ms, "Restart time after bus-off in ms(default 0)");
 
 
 static int sja1000_probe_chip(struct net_device *dev)
@@ -743,7 +737,6 @@ struct net_device *alloc_sja1000dev(int sizeof_priv)
 	if (sizeof_priv)
 		priv->priv = (void *)priv + sizeof(struct sja1000_priv);
 
-	priv->can.restart_ms = restart_ms;
 	priv->debug = debug;
 
 	return dev;
@@ -765,8 +758,11 @@ int register_sja1000dev(struct net_device *dev)
 	if (!sja1000_probe_chip(dev))
 		return -ENODEV;
 
+	dev->flags |= IFF_ECHO;	/* we support local echo */
+
 	dev->open = sja1000_open;
 	dev->stop = sja1000_close;
+
 	dev->hard_start_xmit = sja1000_start_xmit;
 
 	priv->can.do_set_bittime = sja1000_set_bittime;
@@ -799,8 +795,7 @@ static __init int sja1000_init(void)
 {
 	printk(KERN_INFO "%s driver v%s (%s)\n",
 	       drv_name, drv_version, drv_reldate);
-	printk(KERN_INFO "%s - options [echo %d] "
-	       "[debug %d]\n", drv_name, echo, debug);
+	printk(KERN_INFO "%s - options [debug %d]\n", drv_name, debug);
 
 	printk("%s driver %s %s loaded\n", drv_name, drv_version, drv_reldate);
 	return 0;
