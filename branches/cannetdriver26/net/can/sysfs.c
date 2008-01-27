@@ -27,6 +27,8 @@
 #include <linux/can.h>
 #include <linux/can/dev.h>
 
+#include "sysfs.h"
+
 #ifdef CONFIG_SYSFS
 /*
  * Functions to set/get CAN properties used by SYSFS
@@ -102,35 +104,6 @@ static int can_get_custombittime(struct net_device *dev,
 	struct can_priv *priv = netdev_priv(dev);
 
 	*bt = priv->bittime;
-	return 0;
-}
-
-static int can_set_mode(struct net_device *dev, can_mode_t mode)
-{
-	struct can_priv *priv = netdev_priv(dev);
-	int err;
-
-	if (!priv->do_set_mode)
-		return -ENOTSUPP;
-
-	if (mode == CAN_MODE_START &&
-	    priv->bitrate == CAN_BITRATE_UNCONFIGURED) {
-		dev_info(ND2D(dev), "Impossible to start on UNKNOWN speed\n");
-		return EINVAL;
-	}
-
-	err = priv->do_set_mode(dev, mode);
-	if (!err)
-		priv->mode = mode;
-
-	return err;
-}
-
-static int can_get_mode(struct net_device *dev, can_mode_t *mode)
-{
-	struct can_priv *priv = netdev_priv(dev);
-
-	*mode = priv->mode;
 	return 0;
 }
 
@@ -290,52 +263,23 @@ CAN_STATS_ATTR(data_overrun);
 CAN_STATS_ATTR(wakeup);
 CAN_STATS_ATTR(restarts);
 
-static const char *can_mode_names[] = {
-	"stop", "start", "sleep", "unkown"
-};
-
-static ssize_t can_show_mode(struct device *dev,
-			     struct device_attribute *attr,
-			     char *buf)
+static ssize_t can_store_restart(struct device *dev,
+				 struct device_attribute *attr,
+				 const char *buf, size_t count)
 {
 	struct net_device *ndev = to_net_dev(dev);
-	can_mode_t mode;
 	int ret = -EINVAL;
 
-	read_lock(&dev_base_lock);
+	rtnl_lock();
 	if (dev_isalive(ndev)) {
-		can_get_mode(ndev, &mode);
-		if (mode >= ARRAY_SIZE(can_mode_names))
-			mode = ARRAY_SIZE(can_mode_names) - 1;
-		ret = snprintf(buf, PAGE_SIZE, "%s\n", can_mode_names[mode]);
+		if (!(ret = can_restart_now(ndev)))
+			ret = count;
 	}
-	read_unlock(&dev_base_lock);
+	rtnl_unlock();
 	return ret;
 }
 
-static ssize_t can_store_mode(struct device *dev,
-			      struct device_attribute *attr,
-			      const char *buf, size_t count)
-{
-	struct net_device *ndev = to_net_dev(dev);
-	int i, ret = -EINVAL;
-
-	/* Find out the new setting */
-	for (i = 0; i < (ARRAY_SIZE(can_mode_names) - 1); i++) {
-		if (!strncmp(can_mode_names[i], buf, count - 1)) {
-			rtnl_lock();
-			if (dev_isalive(ndev)) {
-				if (!(ret = can_set_mode(ndev, i)))
-					ret = count;
-			}
-			rtnl_unlock();
-		}
-	}
-	return ret;
-}
-
-static DEVICE_ATTR(can_mode, S_IRUGO | S_IWUSR,
-		   can_show_mode, can_store_mode);
+static DEVICE_ATTR(can_restart, S_IWUSR, NULL, can_store_restart);
 
 static const char *can_state_names[] = {
 	"active", "bus-warn", "bus-pass" , "bus-off",
@@ -509,7 +453,7 @@ void can_create_sysfs(struct net_device *dev)
 
 	CAN_CREATE_FILE(dev, can_bitrate);
 	CAN_CREATE_FILE(dev, can_custombittime);
-	CAN_CREATE_FILE(dev, can_mode);
+	CAN_CREATE_FILE(dev, can_restart);
 	CAN_CREATE_FILE(dev, can_ctrlmode);
 	CAN_CREATE_FILE(dev, can_state);
 	CAN_CREATE_FILE(dev, can_restart_ms);
@@ -526,7 +470,7 @@ void can_remove_sysfs(struct net_device *dev)
 {
 	CAN_REMOVE_FILE(dev, can_bitrate);
 	CAN_REMOVE_FILE(dev, can_custombittime);
-	CAN_REMOVE_FILE(dev, can_mode);
+	CAN_REMOVE_FILE(dev, can_restart);
 	CAN_REMOVE_FILE(dev, can_ctrlmode);
 	CAN_REMOVE_FILE(dev, can_state);
 	CAN_REMOVE_FILE(dev, can_clock);

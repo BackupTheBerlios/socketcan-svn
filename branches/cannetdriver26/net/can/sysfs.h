@@ -20,6 +20,8 @@
 #ifndef CAN_SYSFS_H
 #define CAN_SYSFS_H
 
+int can_restart_now(struct net_device *dev);
+
 __init int can_sysfs_init(void);
 __exit void can_sysfs_exit(void);
 

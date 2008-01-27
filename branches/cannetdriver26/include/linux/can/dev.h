@@ -50,7 +50,6 @@ struct can_priv {
 	spinlock_t stats_lock;
 
 	can_state_t state;
-	can_mode_t mode;
 	u32 ctrlmode;
 
 	int restart_ms;
@@ -76,8 +75,7 @@ struct can_priv {
 struct net_device *alloc_candev(int sizeof_priv);
 void free_candev(struct net_device *dev);
 
-int can_calc_bittime(struct can_priv *can, u32 bitrate,
-		     struct can_bittime_std *bittime);
+int can_set_bitrate(struct net_device *dev, u32 bitrate);
 
 void can_bus_off(struct net_device *dev);
 
@@ -85,7 +83,5 @@ void can_close_cleanup(struct net_device *dev);
 
 int can_put_echo_skb(struct sk_buff *skb, struct net_device *dev, int idx);
 void can_get_echo_skb(struct net_device *dev, int idx);
-
-void can_close_cleanup(struct net_device *dev);
 
 #endif /* CAN_DEVICE_H */
