@@ -26,7 +26,7 @@
 #include <linux/can/dev.h>
 #include <asm/io.h>
 
-#include "sja1000dev.h"
+#include "sja1000.h"
 
 
 #define DRV_NAME  "can-ixxat-pci"
