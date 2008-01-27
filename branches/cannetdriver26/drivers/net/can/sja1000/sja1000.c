@@ -187,8 +187,7 @@ int set_reset_mode(struct net_device *dev)
 		udelay(10);
 	}
 
-	printk(KERN_ERR "%s: setting sja1000 into reset mode failed!\n",
-	       dev->name);
+	dev_err(ND2D(dev), "setting SJA1000 into reset mode failed!\n");
 	return 1;
 
 }
@@ -222,8 +221,7 @@ static int set_normal_mode(struct net_device *dev)
 		udelay(10);
 	}
 
-	printk(KERN_ERR "%s: setting sja1000 into normal mode failed!\n",
-	       dev->name);
+	dev_err(ND2D(dev), "setting SJA1000 into normal mode failed!\n");
 	return 1;
 
 }
@@ -301,9 +299,9 @@ static int sja1000_get_state(struct net_device *dev, can_state_t *state)
 #ifdef CONFIG_CAN_DEBUG_DEVICES
 	/* Check state */
 	if (*state != priv->can.state)
-		printk(KERN_ERR
-		       "%s: Oops, state mismatch: hard %d != soft %d\n",
-		       dev->name, *state, priv->can.state);
+		dev_err(ND2D(dev),
+			"Oops, state mismatch: hard %d != soft %d\n",
+			*state, priv->can.state);
 #endif
 	spin_unlock_irq(&priv->can.irq_lock);
 	return 0;
