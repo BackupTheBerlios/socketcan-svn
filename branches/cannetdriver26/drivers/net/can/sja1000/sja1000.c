@@ -567,7 +567,7 @@ static int sja1000_err(struct net_device *dev,
 			state = CAN_STATE_BUS_PASSIVE;
 		} else {
 			iDBG(KERN_INFO "%s: ERROR ACTIVE\n", dev->name);
-			state = CAN_STATE_BUS_ACTIVE;
+			state = CAN_STATE_ACTIVE;
 		}
 	}
 	if (isrc & IRQ_ALI) {
