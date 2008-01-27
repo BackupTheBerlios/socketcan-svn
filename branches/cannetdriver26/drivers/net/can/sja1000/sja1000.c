@@ -78,10 +78,10 @@ MODULE_DESCRIPTION("Socketcan " CHIP_NAME " network device driver");
 
 #define CONFIG_CAN_DEBUG_DEVICES
 #ifdef CONFIG_CAN_DEBUG_DEVICES
-#define DBG(args...)   ((priv->debug > 0) ? printk(args) : 0)
+#define DBG(args...)   ((debug > 0) ? printk(args) : 0)
 /* logging in interrupt context! */
-#define iDBG(args...)  ((priv->debug > 1) ? printk(args) : 0)
-#define iiDBG(args...) ((priv->debug > 2) ? printk(args) : 0)
+#define iDBG(args...)  ((debug > 1) ? printk(args) : 0)
+#define iiDBG(args...) ((debug > 2) ? printk(args) : 0)
 #else
 #define DBG(args...)
 #define iDBG(args...)
@@ -197,7 +197,6 @@ static int set_normal_mode(struct net_device *dev)
 		if ((status & MOD_RM) == 0) {
 #ifdef CONFIG_CAN_DEBUG_DEVICES
 			if (i > 1) {
-				struct sja1000_priv *priv = netdev_priv(dev);
 				iDBG(KERN_INFO "%s: %s looped %d times\n",
 				     dev->name, __FUNCTION__, i);
 			}
@@ -279,7 +278,7 @@ static int sja1000_get_state(struct net_device *dev, can_state_t *state)
 	} else {
 		status = priv->read_reg(dev, REG_SR);
 		if (status & SR_BS)
-			*state = CAN_STATE_BUS_PASSIVE;
+			*state = CAN_STATE_BUS_OFF;
 		else if (status & SR_ES) {
 			if (priv->read_reg(dev, REG_TXERR) > 127 ||
 			    priv->read_reg(dev, REG_RXERR) > 127 )
@@ -518,7 +517,6 @@ static int sja1000_err(struct net_device *dev,
 			iDBG(KERN_INFO "%s: BUS OFF\n", dev->name);
 		} else if (status & SR_ES) {
 			state = CAN_STATE_BUS_WARNING;
-			cf->can_id |= CAN_ERR_BUSOFF;
 			iDBG(KERN_INFO "%s: error\n", dev->name);
 		} else
 			state = CAN_STATE_ACTIVE;
@@ -569,7 +567,7 @@ static int sja1000_err(struct net_device *dev,
 			state = CAN_STATE_BUS_PASSIVE;
 		} else {
 			iDBG(KERN_INFO "%s: ERROR ACTIVE\n", dev->name);
-			state = CAN_STATE_BUS_WARNING;
+			state = CAN_STATE_BUS_ACTIVE;
 		}
 	}
 	if (isrc & IRQ_ALI) {
@@ -589,7 +587,7 @@ static int sja1000_err(struct net_device *dev,
 					 state == CAN_STATE_BUS_PASSIVE)) {
 		uint8_t rxerr = priv->read_reg(dev, REG_RXERR);
 		uint8_t txerr = priv->read_reg(dev, REG_TXERR);
-		cf->can_id |= CAN_ERR_PROT;
+		cf->can_id |= CAN_ERR_CRTL;
 		if (state == CAN_STATE_BUS_WARNING)
 			cf->data[1] = (txerr > rxerr) ?
 				CAN_ERR_CRTL_TX_WARNING :
@@ -736,8 +734,6 @@ struct net_device *alloc_sja1000dev(int sizeof_priv)
 
 	if (sizeof_priv)
 		priv->priv = (void *)priv + sizeof(struct sja1000_priv);
-
-	priv->debug = debug;
 
 	return dev;
 }
