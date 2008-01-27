@@ -349,8 +349,6 @@ static int sja1000_set_bittime(struct net_device *dev, struct can_bittime *bt)
 static void chipset_init(struct net_device *dev)
 {
 	struct sja1000_priv *priv = netdev_priv(dev);
-	struct can_bittime bt;
-	int err;
 
 	/* set clock divider and output control register */
 	priv->write_reg(dev, REG_CDR, priv->cdr | CDR_PELICAN);
@@ -366,15 +364,6 @@ static void chipset_init(struct net_device *dev)
 	priv->write_reg(dev, REG_ACCM2, 0xFF);
 	priv->write_reg(dev, REG_ACCM3, 0xFF);
 
-	/* set bit timing */
-	if (priv->can.bitrate) {
-		bt.type = CAN_BITTIME_STD;
-		err = can_calc_bittime(&priv->can, priv->can.bitrate, &bt.std);
-		if (err)
-			dev_err(ND2D(dev), "failed to calculate bit timing\n");
-		else
-			sja1000_set_bittime(dev, &bt);
-	}
 	priv->write_reg(dev, REG_OCR, priv->ocr | OCR_MODE_NORMAL);
 }
 
@@ -754,7 +743,6 @@ struct net_device *alloc_sja1000dev(int sizeof_priv)
 	if (sizeof_priv)
 		priv->priv = (void *)priv + sizeof(struct sja1000_priv);
 
-	priv->can.bitrate = 500000;
 	priv->can.restart_ms = restart_ms;
 	priv->debug = debug;
 

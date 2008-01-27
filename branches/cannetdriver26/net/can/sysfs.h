@@ -21,8 +21,9 @@
 #define CAN_SYSFS_H
 
 int can_restart_now(struct net_device *dev);
+int can_set_bitrate(struct net_device *dev, u32 bitrate);
 
-__init int can_sysfs_init(void);
-__exit void can_sysfs_exit(void);
+void can_create_sysfs(struct net_device *dev);
+void can_remove_sysfs(struct net_device *dev);
 
 #endif /* CAN_SYSFS_H */

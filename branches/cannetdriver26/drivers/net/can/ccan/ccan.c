@@ -473,16 +473,7 @@ static int ccan_stop(struct net_device *dev)
 static int ccan_chip_config(struct net_device *dev)
 {
 	struct ccan_priv *priv = netdev_priv(dev);
-	struct can_bittime bittime;
-	int ret, i;
-	
-	/* set bit timing */
-	bittime.type = CAN_BITTIME_STD;
-	ret = can_calc_bittime(&priv->can, priv->can.bitrate, &bittime.std);
-	if (ret == 0)
-		ret = ccan_set_bittime(dev, &bittime);
-	if (ret)
-		dev_err(ND2D(dev), "failed to config bit timing\n");
+	int i;
 
 	/* setup message objects */
 	for(i = 0; i <= MAX_OBJECT; i++)

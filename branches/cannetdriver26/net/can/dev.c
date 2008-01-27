@@ -158,7 +158,33 @@ int can_calc_bittime(struct can_priv *can, u32 bitrate,
 		return -EDOM;
 	return 0;
 }
-EXPORT_SYMBOL(can_calc_bittime);
+
+int can_set_bitrate(struct net_device *dev, u32 bitrate)
+{
+	struct can_priv *priv = netdev_priv(dev);
+	int err = -ENOTSUPP;
+
+	if (priv->state != CAN_STATE_STOPPED)
+		return -EBUSY;
+
+	if (priv->do_set_bittime) {
+		if (priv->do_set_bittime) {
+			struct can_bittime bittime;
+			err = can_calc_bittime(priv, bitrate, &bittime.std);
+			if (err)
+				goto out;
+			bittime.type = CAN_BITTIME_STD;
+			err = priv->do_set_bittime(dev, &bittime);
+			if (!err) {
+				priv->bitrate = bitrate;
+				priv->bittime = bittime;
+			}
+		}
+	}
+out:
+	return err;
+}
+EXPORT_SYMBOL(can_set_bitrate);
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,23)
 static struct net_device_stats *can_get_stats(struct net_device *dev)
@@ -201,6 +227,7 @@ struct net_device *alloc_candev(int sizeof_priv)
 	priv = netdev_priv(dev);
 
 	priv->bitrate = CAN_BITRATE_UNCONFIGURED;
+	priv->state = CAN_STATE_STOPPED;
 	priv->max_brp = DEFAULT_MAX_BRP;
 	priv->max_sjw = DEFAULT_MAX_SJW;
 	spin_lock_init(&priv->irq_lock);
@@ -388,14 +415,51 @@ void can_close_cleanup(struct net_device *dev)
 }
 EXPORT_SYMBOL(can_close_cleanup);
 
+static int can_netdev_notifier_call(struct notifier_block *nb,
+				    unsigned long state,
+				    void *ndev)
+{
+	struct net_device *dev = ndev;
+	struct can_priv *priv;
+
+	if (dev->type != ARPHRD_CAN)
+		return 0;
+
+	priv = netdev_priv(dev);
+
+	switch (state) {
+	case NETDEV_REGISTER:
+		/* set default bit timing */
+		if (priv->do_set_bittime &&
+		    priv->bitrate == CAN_BITRATE_UNCONFIGURED) {
+			if (can_set_bitrate(dev, CAN_BITRATE_DEFAULT))
+				dev_err(ND2D(dev), "failed to set bitrate\n");
+		}
+#ifdef CONFIG_SYSFS
+		can_create_sysfs(dev);
+#endif
+		break;
+	case NETDEV_UNREGISTER:
+#ifdef CONFIG_SYSFS
+		can_remove_sysfs(dev);
+#endif
+		break;
+	}
+	return 0;
+}
+
+static struct notifier_block can_netdev_notifier = {
+	.notifier_call = can_netdev_notifier_call,
+};
+
 static __init int can_dev_init(void)
 {
-	return can_sysfs_init();
+	return register_netdevice_notifier(&can_netdev_notifier);
 }
 module_init(can_dev_init);
 
 static __exit void can_dev_exit(void)
 {
-	can_sysfs_exit();
+	unregister_netdevice_notifier(&can_netdev_notifier);
 }
 module_exit(can_dev_exit);

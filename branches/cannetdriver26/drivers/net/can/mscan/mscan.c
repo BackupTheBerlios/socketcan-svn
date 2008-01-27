@@ -132,9 +132,9 @@ static int mscan_set_mode(struct net_device *dev, u8 mode)
 			}
 			if (i >= MSCAN_SET_MODE_RETRIES)
 				ret = -ENODEV;
-			else
-				priv->can.state = CAN_STATE_SLEEPING;
 		}
+		if (!ret)
+			priv->can.state = CAN_STATE_SLEEPING;
 
 		if (!ret && (mode & MSCAN_INITRQ)
 		    && (canctl1 & MSCAN_INITAK) == 0) {
@@ -146,9 +146,9 @@ static int mscan_set_mode(struct net_device *dev, u8 mode)
 			}
 			if (i >= MSCAN_SET_MODE_RETRIES)
 				ret = -ENODEV;
-			else
-				priv->can.state = CAN_STATE_STOPPED;
 		}
+		if (!ret)
+			priv->can.state = CAN_STATE_STOPPED;
 
 		if (!ret && (mode & MSCAN_CSWAI))
 			out_8(&regs->canctl0,
@@ -502,6 +502,7 @@ static irqreturn_t mscan_isr(int irq, void *dev_id)
 				out_8(&regs->cantbsel, mask);
 				stats->tx_bytes += in_8(&regs->tx.dlr);
 				stats->tx_packets++;
+				printk("TX buf %d done\n", entry->id);
 				can_get_echo_skb(dev, entry->id);
 			}
 			priv->tx_active &= ~mask;
@@ -585,6 +586,7 @@ static int mscan_do_set_bittime(struct net_device *dev, struct can_bittime *bt)
 		break;
 
 	default:
+		printk("bt->type=%d\n", bt->type);
 		return -EINVAL;
 	}
 
@@ -654,7 +656,6 @@ static int mscan_close(struct net_device *dev)
 int register_mscandev(struct net_device *dev, int clock_src)
 {
 	struct mscan_regs *regs = (struct mscan_regs *)dev->base_addr;
-	struct mscan_priv *priv = netdev_priv(dev);
 	u8 ctl1;
 
 	ctl1 = in_8(&regs->canctl1);
@@ -681,15 +682,6 @@ int register_mscandev(struct net_device *dev, int clock_src)
 	out_8(&regs->canidac, MSCAN_AF_32BIT);
 
 	mscan_set_mode(dev, MSCAN_INIT_MODE);
-
-	/* set default bit timing */
-	if (priv->can.bitrate) {
-		struct can_bittime bt = { .type = CAN_BITTIME_STD };
-		if  (can_calc_bittime(&priv->can, priv->can.bitrate, &bt.std))
-			dev_err(ND2D(dev), "failed to calculate bit timing\n");
-		else
-			mscan_do_set_bittime(dev, &bt);
-	}
 
 	return register_netdev(dev);
 }
@@ -731,7 +723,6 @@ struct net_device *alloc_mscandev(void)
 	dev->weight = 8;
 #endif
 
-	priv->can.bitrate = CAN_BITRATE_DEFAULT;
 	priv->can.do_set_bittime = mscan_do_set_bittime;
 	priv->can.do_set_mode = mscan_do_set_mode;
 

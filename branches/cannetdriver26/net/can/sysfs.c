@@ -38,32 +38,6 @@
  *        if (!capable(CAP_NET_ADMIN))
  *        	return -EPERM;
  */
-static int can_set_bitrate(struct net_device *dev, u32 bitrate)
-{
-	struct can_priv *priv = netdev_priv(dev);
-	int err = -ENOTSUPP;
-
-	if (priv->state != CAN_STATE_STOPPED)
-		return -EBUSY;
-
-	if (priv->do_set_bittime) {
-		if (priv->do_set_bittime) {
-			struct can_bittime bittime;
-			err = can_calc_bittime(priv, bitrate, &bittime.std);
-			if (err)
-				goto out;
-			bittime.type = CAN_BITTIME_STD;
-			err = priv->do_set_bittime(dev, &bittime);
-			if (!err) {
-				priv->bitrate = bitrate;
-				priv->bittime = bittime;
-			}
-		}
-	}
-out:
-	return err;
-}
-
 static int can_get_bitrate(struct net_device *dev, u32 *bitrate)
 {
 	struct can_priv *priv = netdev_priv(dev);
@@ -478,47 +452,7 @@ void can_remove_sysfs(struct net_device *dev)
         sysfs_remove_group(&(dev->dev.kobj), &can_stats_group);
 }
 
-static int can_netdev_notifier_call(struct notifier_block *nb,
-				    unsigned long state,
-				    void *ndev)
-{
-	struct net_device *dev = ndev;
-
-	if (dev->type != ARPHRD_CAN)
-		return 0;
-
-	switch (state) {
-	case NETDEV_REGISTER:
-		can_create_sysfs(dev);
-		break;
-	case NETDEV_UNREGISTER:
-		can_remove_sysfs(dev);
-		break;
-	}
-	return 0;
-}
-
-static struct notifier_block can_netdev_notifier = {
-	.notifier_call = can_netdev_notifier_call,
-};
-
 #endif /* CONFIG_SYSFS */
-
-__init int can_sysfs_init(void)
-{
-#ifdef CONFIG_SYSFS
-	return register_netdevice_notifier(&can_netdev_notifier);
-#else
-	return 0;
-#endif
-}
-
-__exit void can_sysfs_exit(void)
-{
-#ifdef CONFIG_SYSFS
-	unregister_netdevice_notifier(&can_netdev_notifier);
-#endif
-}
 
 
 
