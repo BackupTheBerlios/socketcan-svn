@@ -118,7 +118,7 @@ config CAN_EMS_PCI
 	help
 
 	This driver is for the two channel CPC PCI card from EMS Dr. Thomas
-	Wünsche (http://www.ems-wuensche.de).
+	Wuensche (http://www.ems-wuensche.de).
 
 config CAN_IXXAT_PCI
 	tristate "IXXAT PCI Card"
