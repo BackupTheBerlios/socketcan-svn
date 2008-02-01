@@ -622,7 +622,7 @@ static int mscan_open(struct net_device *dev)
 	ret = request_irq(dev->irq, mscan_isr, IRQF_SHARED, dev->name, dev);
 #endif
 
-	if (ret  < 0) {
+	if (ret < 0) {
 #if LINUX_VERSION_CODE > KERNEL_VERSION(2,6,23)
 		napi_disable(&priv->napi);
 #endif
@@ -634,7 +634,12 @@ static int mscan_open(struct net_device *dev)
 	priv->open_time = jiffies;
 
 	out_8(&regs->canctl1, in_8(&regs->canctl1) & ~MSCAN_LISTEN);
-	return mscan_start(dev);
+
+	if ((ret = mscan_start(dev)))
+		return ret;
+	netif_start_queue(dev);
+
+	return 0;
 }
 
 static int mscan_close(struct net_device *dev)
