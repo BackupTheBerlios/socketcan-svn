@@ -404,13 +404,12 @@ static int sja1000_start_xmit(struct sk_buff *skb, struct net_device *dev)
 		priv->write_reg(dev, dreg++, cf->data[i]);
 	}
 
-	priv->write_reg(dev, REG_CMR, CMD_TR);
-
 	stats->tx_bytes += dlc;
-
 	dev->trans_start = jiffies;
 
 	can_put_echo_skb(skb, dev, 0);
+
+	priv->write_reg(dev, REG_CMR, CMD_TR);
 
 	return 0;
 }
