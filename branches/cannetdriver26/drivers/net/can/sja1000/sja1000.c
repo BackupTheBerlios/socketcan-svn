@@ -410,7 +410,9 @@ static int sja1000_start_xmit(struct sk_buff *skb, struct net_device *dev)
 
 	dev->trans_start = jiffies;
 
-	return can_put_echo_skb(skb, dev, 0);
+	can_put_echo_skb(skb, dev, 0);
+
+	return 0;
 }
 
 static void sja1000_rx(struct net_device *dev)

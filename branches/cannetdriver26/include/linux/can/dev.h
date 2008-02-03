@@ -85,7 +85,7 @@ void can_bus_off(struct net_device *dev);
 
 void can_close_cleanup(struct net_device *dev);
 
-int can_put_echo_skb(struct sk_buff *skb, struct net_device *dev, int idx);
+void can_put_echo_skb(struct sk_buff *skb, struct net_device *dev, int idx);
 void can_get_echo_skb(struct net_device *dev, int idx);
 
 #endif /* CAN_DEVICE_H */

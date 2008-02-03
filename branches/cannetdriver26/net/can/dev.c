@@ -287,14 +287,14 @@ void can_flush_echo_skb(struct net_device *dev)
 	}
 }
 
-int can_put_echo_skb(struct sk_buff *skb, struct net_device *dev, int idx)
+void can_put_echo_skb(struct sk_buff *skb, struct net_device *dev, int idx)
 {
 	struct can_priv *priv = netdev_priv(dev);
 
 	/* set flag whether this packet has to be looped back */
 	if (!(dev->flags & IFF_ECHO) || skb->pkt_type != PACKET_LOOPBACK) {
 		kfree_skb(skb);
-		return 0;
+		return;
 	}
 
 	if (!priv->echo_skb[idx]) {
@@ -306,7 +306,7 @@ int can_put_echo_skb(struct sk_buff *skb, struct net_device *dev, int idx)
 			skb = skb_clone(old_skb, GFP_ATOMIC);
 			kfree_skb(old_skb);
 			if (!skb) {
-				return 0;
+				return;
 			}
 		} else
 			skb_orphan(skb);
@@ -323,12 +323,10 @@ int can_put_echo_skb(struct sk_buff *skb, struct net_device *dev, int idx)
 		priv->echo_skb[idx] = skb;
 	} else {
 		/* locking problem with netif_stop_queue() ?? */
-		printk(KERN_ERR "%s: %s: occupied echo_skb!\n",
+		printk(KERN_ERR "%s: %s: BUG! echo_skb is occupied!\n",
 		       dev->name, __FUNCTION__);
 		kfree_skb(skb);
 	}
-
-	return 0;
 }
 EXPORT_SYMBOL(can_put_echo_skb);
 
