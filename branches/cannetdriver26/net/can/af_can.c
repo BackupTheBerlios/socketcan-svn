@@ -147,7 +147,6 @@ static int can_create(struct socket *sock, int protocol)
 {
 	struct sock *sk;
 	struct can_proto *cp;
-	char module_name[sizeof("can-proto-000")];
 	int err = 0;
 
 	sock->state = SS_UNCONNECTED;
@@ -160,26 +159,21 @@ static int can_create(struct socket *sock, int protocol)
 		return -EAFNOSUPPORT;
 #endif
 
+#ifdef CONFIG_KMOD
 	/* try to load protocol module, when CONFIG_KMOD is defined */
 	if (!proto_tab[protocol]) {
-		sprintf(module_name, "can-proto-%d", protocol);
-		err = request_module(module_name);
+		err = request_module("can-proto-%d", protocol);
 
 		/*
 		 * In case of error we only print a message but don't
 		 * return the error code immediately.  Below we will
 		 * return -EPROTONOSUPPORT
 		 */
-		if (err == -ENOSYS) {
-			if (printk_ratelimit())
-				printk(KERN_INFO "can: request_module(%s)"
-				       " not implemented.\n", module_name);
-		} else if (err) {
-			if (printk_ratelimit())
-				printk(KERN_ERR "can: request_module(%s)"
-				       " failed.\n", module_name);
-		}
+		if (err && printk_ratelimit())
+			printk(KERN_ERR "can: request_module "
+			       "(can-proto-%d) failed.\n", protocol);
 	}
+#endif
 
 	spin_lock(&proto_tab_lock);
 	cp = proto_tab[protocol];
@@ -742,28 +736,30 @@ int can_proto_register(struct can_proto *cp)
 		return -EINVAL;
 	}
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,12)
+	err = proto_register(cp->prot, 0);
+	if (err < 0)
+		return err;
+#endif
+
 	spin_lock(&proto_tab_lock);
 	if (proto_tab[proto]) {
 		printk(KERN_ERR "can: protocol %d already registered\n",
 		       proto);
 		err = -EBUSY;
-		goto errout;
+	} else {
+		proto_tab[proto] = cp;
+
+		/* use generic ioctl function if not defined by module */
+		if (!cp->ops->ioctl)
+			cp->ops->ioctl = can_ioctl;
 	}
+	spin_unlock(&proto_tab_lock);
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,12)
-	err = proto_register(cp->prot, 0);
 	if (err < 0)
-		goto errout;
+		proto_unregister(cp->prot);
 #endif
-
-	proto_tab[proto] = cp;
-
-	/* use generic ioctl function if the module doesn't bring its own */
-	if (!cp->ops->ioctl)
-		cp->ops->ioctl = can_ioctl;
-
- errout:
-	spin_unlock(&proto_tab_lock);
 
 	return err;
 }
@@ -782,11 +778,12 @@ void can_proto_unregister(struct can_proto *cp)
 		printk(KERN_ERR "BUG: can: protocol %d is not registered\n",
 		       proto);
 	}
+	proto_tab[proto] = NULL;
+	spin_unlock(&proto_tab_lock);
+
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,12)
 	proto_unregister(cp->prot);
 #endif
-	proto_tab[proto] = NULL;
-	spin_unlock(&proto_tab_lock);
 }
 EXPORT_SYMBOL(can_proto_unregister);
 
