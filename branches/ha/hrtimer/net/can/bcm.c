@@ -1070,6 +1070,9 @@ static int bcm_tx_setup(struct bcm_msg_head *msg_head, struct msghdr *msg,
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,22)
 		hrtimer_init(&op->timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
 		op->timer.function = bcm_tx_timeout_handler;
+
+		/* currently unused in tx_ops */
+		hrtimer_init(&op->thrtimer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
 #else
 		setup_timer(&op->timer, bcm_tx_timeout_handler,
 			    (unsigned long)op);
