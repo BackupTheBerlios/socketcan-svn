@@ -711,13 +711,10 @@ static void bcm_rx_timeout_handler(unsigned long data)
 }
 
 /*
- * bcm_rx_thr_handler - the time for blocked content updates is over now:
- *                      Check for throttled data and send it to the userspace
+ * bcm_rx_thr_flush - Check for throttled data and send it to the userspace
  */
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,22)
-static enum hrtimer_restart bcm_rx_thr_handler(struct hrtimer *hrtimer)
+static void bcm_rx_thr_flush(struct bcm_op *op)
 {
-	struct bcm_op *op = container_of(hrtimer, struct bcm_op, thrtimer);
 	int i = 0;
 
 	if (op->nframes > 1) {
@@ -737,6 +734,18 @@ static enum hrtimer_restart bcm_rx_thr_handler(struct hrtimer *hrtimer)
 			bcm_rx_changed(op, &op->last_frames[0]);
 		}
 	}
+}
+
+/*
+ * bcm_rx_thr_handler - the time for blocked content updates is over now:
+ *                      Check for throttled data and send it to the userspace
+ */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,22)
+static enum hrtimer_restart bcm_rx_thr_handler(struct hrtimer *hrtimer)
+{
+	struct bcm_op *op = container_of(hrtimer, struct bcm_op, thrtimer);
+
+	bcm_rx_thr_flush(op);
 
 	/* rearm throttle handling */
 	op->kt_lastmsg = ktime_set(0, 0);
@@ -747,28 +756,11 @@ static enum hrtimer_restart bcm_rx_thr_handler(struct hrtimer *hrtimer)
 static void bcm_rx_thr_handler(unsigned long data)
 {
 	struct bcm_op *op = (struct bcm_op *)data;
-	int i = 0;
+
+	bcm_rx_thr_flush(op);
 
 	/* mark disabled / consumed timer */
 	op->thrtimer.expires = 0;
-
-	if (op->nframes > 1) {
-		/* for MUX filter we start at index 1 */
-		for (i = 1; i < op->nframes; i++) {
-			if ((op->last_frames) &&
-			    (op->last_frames[i].can_dlc & RX_THR)) {
-				op->last_frames[i].can_dlc &= ~RX_THR;
-				bcm_rx_changed(op, &op->last_frames[i]);
-			}
-		}
-
-	} else {
-		/* for RX_FILTER_ID and simple filter */
-		if (op->last_frames && (op->last_frames[0].can_dlc & RX_THR)) {
-			op->last_frames[0].can_dlc &= ~RX_THR;
-			bcm_rx_changed(op, &op->last_frames[0]);
-		}
-	}
 }
 #endif
 
@@ -1334,18 +1326,13 @@ static int bcm_rx_setup(struct bcm_msg_head *msg_head, struct msghdr *msg,
 			if (!op->kt_ival1.tv64)
 				hrtimer_cancel(&op->timer);
 
-			/* free currently blocked msgs ? */
-			if (hrtimer_active(&op->thrtimer)) {
-				/* send blocked msgs hereafter */
-				hrtimer_forward(&op->thrtimer, ktime_get(),
-						ktime_set(0, 0));
-			}
-
 			/*
-			 * if (op->kt_ival2.tv64) is zero, no (new) throttling
-			 * will happen. For details see functions
-			 * bcm_rx_update_and_send() and bcm_rx_thr_handler()
+			 * In any case cancel the throttle timer, flush
+			 * potentially blocked msgs and reset throttle handling
 			 */
+			hrtimer_cancel(&op->thrtimer);
+			bcm_rx_thr_flush(op);
+			op->kt_lastmsg = ktime_set(0, 0);
 		}
 
 		if ((op->flags & STARTTIMER) && op->kt_ival1.tv64)
@@ -1364,17 +1351,13 @@ static int bcm_rx_setup(struct bcm_msg_head *msg_head, struct msghdr *msg,
 			if (!op->j_ival1)
 				del_timer(&op->timer);
 
-			/* free currently blocked msgs ? */
-			if (op->thrtimer.expires) {
-				/* send blocked msgs hereafter */
-				mod_timer(&op->thrtimer, jiffies + 2);
-			}
-
 			/*
-			 * if (op->j_ival2) is zero, no (new) throttling
-			 * will happen. For details see functions
-			 * bcm_rx_update_and_send() and bcm_rx_thr_handler()
+			 * In any case cancel the throttle timer, flush
+			 * potentially blocked msgs and reset throttle handling
 			 */
+			del_timer(&op->thrtimer);
+			bcm_rx_thr_flush(op);
+			op->thrtimer.expires = 0;
 		}
 
 		if ((op->flags & STARTTIMER) && op->j_ival1)
