@@ -113,12 +113,12 @@ config CAN_H7202
 	  This is a driver for the hynix h7202 can controller.
 
 config CAN_EMS_PCI
-	tristate "EMS CPC PCI Card"
+	tristate "EMS CPC-PCI and CPCe-PCI Card"
 	depends on PCI && CAN_SJA1000
 	help
 
-	This driver is for the two channel CPC PCI card from EMS Dr. Thomas
-	Wuensche (http://www.ems-wuensche.de).
+	This driver is for the one or two channel CPC-PCI and CPC-PCIe
+	cards from EMS Dr. Thomas Wuensche (http://www.ems-wuensche.de).
 
 config CAN_IXXAT_PCI
 	tristate "IXXAT PCI Card"
