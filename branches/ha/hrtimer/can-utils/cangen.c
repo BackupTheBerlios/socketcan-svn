@@ -88,6 +88,8 @@ void print_usage(char *prg)
 	    "default: 8\n");
     fprintf(stderr, "         -f <canframe> (other fixed CAN frame) "
 	    "default: 123#0123456789ABCDEF\n");
+    fprintf(stderr, "         -i            (increment values)      "
+	    "default: random values\n");
     fprintf(stderr, "         -x            (disable loopback)      "
 	    "default: standard loopback\n");
     fprintf(stderr, "         -v            (verbose)               "
@@ -108,7 +110,9 @@ int main(int argc, char **argv)
     unsigned char fix_dlc = 0;
     unsigned char default_frame = 1;
     unsigned char loopback_disable = 0;
+    unsigned char inc_values = 0;
     unsigned char verbose = 0;
+    unsigned long long incdata = 0;
 
     int opt;
     int s; /* socket */
@@ -116,6 +120,7 @@ int main(int argc, char **argv)
     struct sockaddr_can addr;
     static struct can_frame frame;
     int nbytes;
+    int i;
     struct ifreq ifr;
 
     struct timespec ts;
@@ -124,7 +129,7 @@ int main(int argc, char **argv)
     signal(SIGHUP, sigterm);
     signal(SIGINT, sigterm);
 
-    while ((opt = getopt(argc, argv, "g:eIDLf:xv")) != -1) {
+    while ((opt = getopt(argc, argv, "g:eIDLf:xiv")) != -1) {
 	switch (opt) {
 	case 'g':
 	    gap = strtoul(optarg, NULL, 10);
@@ -160,6 +165,10 @@ int main(int argc, char **argv)
 
 	case 'x':
 	    loopback_disable = 1;
+	    break;
+
+	case 'i':
+	    inc_values = 1;
 	    break;
 
 	default:
@@ -231,7 +240,11 @@ int main(int argc, char **argv)
     while (running) {
 
 	if (!fix_id) {
-	    frame.can_id = random();
+	    if (inc_values)
+		frame.can_id++;
+	    else
+		frame.can_id = random();
+
 	    if (extended) {
 		frame.can_id &= CAN_EFF_MASK;
 		frame.can_id |= CAN_EFF_FLAG;
@@ -240,15 +253,28 @@ int main(int argc, char **argv)
 	}
 
 	if (!fix_dlc) {
-	    frame.can_dlc = random() & 0xF;
-	    if (frame.can_dlc & 8)
-		frame.can_dlc = 8; /* for about 50% of the frames */
+	    if (inc_values) {
+		frame.can_dlc++;
+		frame.can_dlc %= 9;
+	    } else {
+		frame.can_dlc = random() & 0xF;
+		if (frame.can_dlc & 8)
+		    frame.can_dlc = 8; /* for about 50% of the frames */
+	    }
 	}
 
 	if (!fix_data) {
-	    /* that's what the 64 bit alignment of data[] is for ... :) */
-	    *(unsigned long*)(&frame.data[0]) = random();
-	    *(unsigned long*)(&frame.data[4]) = random();
+	    if (inc_values) {
+		incdata++;
+
+		for (i=0; i<8 ;i++)
+		    frame.data[i] = (incdata >> (7-i)*8) & 0xFFULL;
+
+	    } else {
+		/* that's what the 64 bit alignment of data[] is for ... :) */
+		*(unsigned long*)(&frame.data[0]) = random();
+		*(unsigned long*)(&frame.data[4]) = random();
+	    }
 	}
 
 	if ((nbytes = write(s, &frame, sizeof(struct can_frame))) < 0) {
