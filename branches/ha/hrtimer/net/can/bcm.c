@@ -583,6 +583,7 @@ static void bcm_rx_update_and_send(struct bcm_op *op,
 		hrtimer_start(&op->thrtimer,
 			      ktime_add(op->kt_lastmsg, op->kt_ival2),
 			      HRTIMER_MODE_ABS);
+		return;
 	}
 
 	/* the gap was that big, that throttling was not needed here */
