@@ -752,7 +752,6 @@ static enum hrtimer_restart bcm_rx_thr_handler(struct hrtimer *hrtimer)
 	struct bcm_op *op = container_of(hrtimer, struct bcm_op, thrtimer);
 
 	if (bcm_rx_thr_flush(op)) {
-		op->kt_lastmsg = ktime_get();
 		hrtimer_forward(hrtimer, op->kt_lastmsg, op->kt_ival2);
 		return HRTIMER_RESTART;
 	} else {
