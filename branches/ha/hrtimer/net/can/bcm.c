@@ -45,7 +45,6 @@
 #include <linux/version.h>
 #include <linux/init.h>
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,22)
-#include <linux/ktime.h>
 #include <linux/hrtimer.h>
 #endif
 #include <linux/list.h>
@@ -581,8 +580,6 @@ static void bcm_rx_update_and_send(struct bcm_op *op,
 	    ktime_to_us(op->kt_ival2)) {
 		/* mark as 'throttled' and start timer */
 		lastdata->can_dlc |= RX_THR;
-		printk("starting thrtimer for op %p\n", op);
-
 		hrtimer_start(&op->thrtimer,
 			      ktime_add(op->kt_lastmsg, op->kt_ival2),
 			      HRTIMER_MODE_ABS);
