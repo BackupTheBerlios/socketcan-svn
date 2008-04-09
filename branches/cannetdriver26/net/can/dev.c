@@ -442,6 +442,10 @@ static int can_netdev_notifier_call(struct notifier_block *nb,
 
 	priv = netdev_priv(dev);
 
+	/* software CAN devices like 'vcan' do not have private data */
+	if (!priv)
+		return 0;
+
 	switch (state) {
 	case NETDEV_REGISTER:
 		/* set default bit timing */
