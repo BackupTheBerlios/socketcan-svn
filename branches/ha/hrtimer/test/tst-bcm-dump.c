@@ -29,6 +29,7 @@
 #include <unistd.h>
 #include <string.h>
 #include <time.h>
+#include <libgen.h>
 
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -39,6 +40,18 @@
 #include <linux/can.h>
 #include <linux/can/bcm.h>
 
+#define DEFAULT_IFACE "vcan0"
+
+void print_usage(char *prg)
+{
+    fprintf(stderr, "\nUsage: %s [options]\n", prg);
+    fprintf(stderr, "Options: -i <interface> (CAN interface. Default: '%s')\n", DEFAULT_IFACE);
+    fprintf(stderr, "         -o <timeout>   (Timeout value in nsecs. Default: 0)\n");
+    fprintf(stderr, "         -t <throttle>  (Throttle value in nsecs. Default: 0)\n");
+    fprintf(stderr, "         -s             (set STARTTIMER flag. Default: off)\n");
+    fprintf(stderr, "\n");
+}
+
 int main(int argc, char **argv)
 {
     int s;
@@ -46,7 +59,7 @@ int main(int argc, char **argv)
     int nbytes;
     int i;
     struct ifreq ifr;
-    char *ifname = "vcan0";
+    char *ifname = DEFAULT_IFACE;
     int opt;
     struct timeval tv;
     unsigned long starttimer = 0;
@@ -59,20 +72,27 @@ int main(int argc, char **argv)
 
     while ((opt = getopt(argc, argv, "i:o:t:s")) != -1) {
         switch (opt) {
+
         case 'i':
 	    ifname = optarg;
             break;
+
         case 'o':
 	    timeout = atoll(optarg);
             break;
+
         case 't':
 	    throttle = atoll(optarg);
             break;
+
         case 's':
 	    starttimer = STARTTIMER;
             break;
+
+        case '?':
         default:
-            fprintf(stderr, "Unknown option %c\n", opt);
+	    print_usage(basename(argv[0]));
+	    exit(1);
             break;
         }
     }
