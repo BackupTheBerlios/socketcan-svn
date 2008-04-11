@@ -41,11 +41,13 @@
 #include <linux/can/bcm.h>
 
 #define DEFAULT_IFACE "vcan0"
+#define DEFAULT_CANID 0x42
 
 void print_usage(char *prg)
 {
     fprintf(stderr, "\nUsage: %s [options]\n", prg);
     fprintf(stderr, "Options: -i <interface> (CAN interface. Default: '%s')\n", DEFAULT_IFACE);
+    fprintf(stderr, "         -c <can_id>    (used CAN ID. Default: 0x%03X)\n", DEFAULT_CANID);
     fprintf(stderr, "         -o <timeout>   (Timeout value in nsecs. Default: 0)\n");
     fprintf(stderr, "         -t <throttle>  (Throttle value in nsecs. Default: 0)\n");
     fprintf(stderr, "         -s             (set STARTTIMER flag. Default: off)\n");
@@ -60,6 +62,7 @@ int main(int argc, char **argv)
     int i;
     struct ifreq ifr;
     char *ifname = DEFAULT_IFACE;
+    canid_t canid = DEFAULT_CANID;
     int opt;
     struct timeval tv;
     unsigned long starttimer = 0;
@@ -70,11 +73,15 @@ int main(int argc, char **argv)
       struct can_frame frame;
     } msg;
 
-    while ((opt = getopt(argc, argv, "i:o:t:s")) != -1) {
+    while ((opt = getopt(argc, argv, "i:c:o:t:s")) != -1) {
         switch (opt) {
 
         case 'i':
 	    ifname = optarg;
+            break;
+
+        case 'c':
+	    canid = strtoul(optarg, (char **)NULL, 16);
             break;
 
         case 'o':
@@ -103,10 +110,18 @@ int main(int argc, char **argv)
 	return 1;
     }
 
+    if (strcmp(ifname, "any") == 0)
+	addr.can_ifindex = 0;
+    else {
+	strcpy(ifr.ifr_name, ifname);
+	if (ioctl(s, SIOCGIFINDEX, &ifr) < 0) {
+	    perror("SIOCGIFINDEX");
+	    return 1;
+	}
+	addr.can_ifindex = ifr.ifr_ifindex;
+    }
+
     addr.can_family = PF_CAN;
-    strcpy(ifr.ifr_name, ifname);
-    ioctl(s, SIOCGIFINDEX, &ifr);
-    addr.can_ifindex = ifr.ifr_ifindex;
 
     if (connect(s, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
 	perror("connect");
@@ -114,7 +129,7 @@ int main(int argc, char **argv)
     }
 
     msg.msg_head.opcode		= RX_SETUP;
-    msg.msg_head.can_id		= 0x42;
+    msg.msg_head.can_id		= canid;
     msg.msg_head.flags		= SETTIMER|RX_FILTER_ID|starttimer;
     msg.msg_head.ival1.tv_sec	= timeout / 1000000;
     msg.msg_head.ival1.tv_usec	= timeout % 1000000;
