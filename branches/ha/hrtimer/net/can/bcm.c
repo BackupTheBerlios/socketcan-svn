@@ -78,11 +78,7 @@ RCSID("$Id$");
 #define REGMASK(id) ((id & CAN_RTR_FLAG) | ((id & CAN_EFF_FLAG) ? \
 			(CAN_EFF_MASK | CAN_EFF_FLAG) : CAN_SFF_MASK))
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,22)
-#define CAN_BCM_VERSION CAN_VERSION "-hrtimer"
-#else
-#define CAN_BCM_VERSION CAN_VERSION
-#endif
+#define CAN_BCM_VERSION "20080415"
 static __initdata const char banner[] = KERN_INFO
 	"can: broadcast manager protocol (rev " CAN_BCM_VERSION ")\n";
 
