@@ -111,11 +111,12 @@ void print_usage(char *prg)
     fprintf(stderr, "\n");
     fprintf(stderr, "Up to %d CAN interfaces with optional filter sets can be specified\n", MAXSOCK);
     fprintf(stderr, "on the commandline in the form: <ifname>[,filter]*\n");
-    fprintf(stderr, "\nUp to %d filters and be specified for each interface:\n", MAXFILTER);
+    fprintf(stderr, "\nUp to %d comma separated filters can be specified for each given CAN interface:\n", MAXFILTER);
     fprintf(stderr, " <can_id>:<can_mask> (matches when <received_can_id> & mask == can_id & mask)\n");
     fprintf(stderr, " <can_id>~<can_mask> (matches when <received_can_id> & mask != can_id & mask)\n");
     fprintf(stderr, " #<error_mask>       (set error frame filter, see include/linux/can/error.h)\n");
     fprintf(stderr, "\nUse interface name '%s' to receive from all CAN interfaces.\n", ANYDEV);
+    fprintf(stderr, "CAN IDs, masks and data content are given and expected in hexadecimal values.\n");
     fprintf(stderr, "\nExamples:\n");
     fprintf(stderr, "%s -c -c -ta can0,123:7FF,400:700,#000000FF can2,400~7F0 can3 can8\n", prg);
     fprintf(stderr, "%s -l any,0~0,#FFFFFFFF    (log only error frames but no(!) data frames)\n", prg);
