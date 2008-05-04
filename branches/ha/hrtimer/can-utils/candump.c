@@ -67,8 +67,6 @@
 #include "terminal.h"
 #include "lib.h"
 
-#define DEBUG
-
 #define MAXSOCK 16    /* max. number of CAN interfaces given on the cmdline */
 #define MAXFILTER 30  /* max. number of possible filters for each socket */
 #define MAXIFNAMES 30 /* size of receive name index to omit ioctls */
@@ -102,19 +100,27 @@ void print_usage(char *prg)
 {
     fprintf(stderr, "\nUsage: %s [options] <CAN interface>+\n", prg);
     fprintf(stderr, "  (use CTRL-C to terminate %s)\n\n", prg);
-    fprintf(stderr, "Options: -t <type>   (timestamp: Absolute/Delta/Zero)\n");
+    fprintf(stderr, "Options: -t <type>   (timestamp: (a)bsolute/(d)elta/(z)ero/(A)bsolute w date)\n");
     fprintf(stderr, "         -c          (increment color mode level)\n");
     fprintf(stderr, "         -a          (enable additional ASCII output)\n");
-    fprintf(stderr, "         -s <level>  (silent mode - 1: animation 2: nothing)\n");
+    fprintf(stderr, "         -s <level>  (silent mode - 1: animation 2: completely silent)\n");
     fprintf(stderr, "         -b <can>    (bridge mode - send received frames to <can>)\n");
     fprintf(stderr, "         -B <can>    (bridge mode - like '-b' with disabled loopback)\n");
     fprintf(stderr, "         -l          (log CAN-frames into file)\n");
     fprintf(stderr, "         -L          (use log file format on stdout)\n");
     fprintf(stderr, "\n");
-    fprintf(stderr, "* The CAN ID filter matches, when ...\n");
-    fprintf(stderr, "       <received_can_id> & mask == value & mask\n");
+    fprintf(stderr, "Up to %d CAN interfaces with optional filter sets can be specified\n", MAXSOCK);
+    fprintf(stderr, "on the commandline in the form: <ifname>[,filter]*\n");
+    fprintf(stderr, "\nUp to %d filters and be specified for each interface:\n", MAXFILTER);
+    fprintf(stderr, " <can_id>:<can_mask> (matches when <received_can_id> & mask == can_id & mask)\n");
+    fprintf(stderr, " <can_id>~<can_mask> (matches when <received_can_id> & mask != can_id & mask)\n");
+    fprintf(stderr, " #<error_mask>       (set error frame filter, see include/linux/can/error.h)\n");
+    fprintf(stderr, "\nUse interface name '%s' to receive from all CAN interfaces.\n", ANYDEV);
+    fprintf(stderr, "\nExamples:\n");
+    fprintf(stderr, "%s -c -c -ta can0,123:7FF,400:700,#000000FF can2,400~7F0 can3 can8\n", prg);
+    fprintf(stderr, "%s -l any,0~0,#FFFFFFFF    (log only error frames but no(!) data frames)\n", prg);
+    fprintf(stderr, "%s vcan2,92345678:9FFFFFFF (match only for extended CAN ID 12345678)\n", prg);
     fprintf(stderr, "\n");
-    fprintf(stderr, "Use interface name '%s' to receive from all CAN interfaces.\n\n", ANYDEV);
 }
 
 void sigterm(int signo)
@@ -127,7 +133,7 @@ int idx2dindex(int ifidx, int socket) {
     int i;
     struct ifreq ifr;
 
-    for (i=0; i<MAXIFNAMES; i++) {
+    for (i=0; i < MAXIFNAMES; i++) {
 	if (dindex[i] == ifidx)
 	    return i;
     }
@@ -382,28 +388,6 @@ int main(int argc, char **argv)
 			   &rfilter, numfilter * sizeof(struct can_filter));
 	} /* if (nptr) */
 
-#if 0
-	if (mask[i] || value[i]) {
-
-	    printf("CAN ID filter[%d] for %s set to "
-		   "mask = %08X, value = %08X %s\n",
-		   i, argv[optind+i], mask[i], value[i],
-		   (inv_filter[i]) ? "(inv_filter)" : "");
-
-	    rfilter.can_id   = value[i];
-	    rfilter.can_mask = mask[i];
-	    if (inv_filter[i])
-		rfilter.can_id |= CAN_INV_FILTER;
-
-	    setsockopt(s[i], SOL_CAN_RAW, CAN_RAW_FILTER,
-		       &rfilter, sizeof(rfilter));
-	}
-
-	if (err_mask[i])
-	    setsockopt(s[i], SOL_CAN_RAW, CAN_RAW_ERR_FILTER,
-		       &err_mask[i], sizeof(err_mask[i]));
-#endif
-
 	if (bind(s[i], (struct sockaddr *)&addr, sizeof(addr)) < 0) {
 	    perror("bind");
 	    return 1;
@@ -423,12 +407,12 @@ int main(int argc, char **argv)
 	localtime_r(&currtime, &now);
 
 	sprintf(fname, "candump-%04d-%02d-%02d_%02d%02d%02d.log",
-	       now.tm_year + 1900,
-	       now.tm_mon + 1,
-	       now.tm_mday,
-	       now.tm_hour,
-	       now.tm_min,
-	       now.tm_sec);
+		now.tm_year + 1900,
+		now.tm_mon + 1,
+		now.tm_mday,
+		now.tm_hour,
+		now.tm_min,
+		now.tm_sec);
 
 	printf("\nEnabling Logfile '%s'\n\n", fname);
 
@@ -574,7 +558,7 @@ out_fflush:
 	close(s[i]);
 
     if (bridge)
-      close(bridge);
+	close(bridge);
 
     if (log)
 	fclose(logfile);
