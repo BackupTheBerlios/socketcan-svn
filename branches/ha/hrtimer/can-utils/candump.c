@@ -185,11 +185,12 @@ int main(int argc, char **argv)
     unsigned char logfrmt = 0;
     int opt, ret;
     int currmax, numfilter;
+    char *ptr, *nptr;
     struct sockaddr_can addr;
     struct can_filter rfilter[MAXFILTER];
     can_err_mask_t err_mask;
     struct can_frame frame;
-    int nbytes, i, j;
+    int nbytes, i;
     struct ifreq ifr;
     struct timeval tv, last_tv;
     FILE *logfile = NULL;
@@ -230,8 +231,7 @@ int main(int argc, char **argv)
 	    if (strlen(optarg) >= IFNAMSIZ) {
 		printf("Name of CAN device '%s' is too long!\n\n", optarg);
 		return 1;
-	    }
-	    else {
+	    } else {
 		bridge = socket(PF_CAN, SOCK_RAW, CAN_RAW);
 		if (bridge < 0) {
 		    perror("bridge socket");
@@ -289,16 +289,99 @@ int main(int argc, char **argv)
 	return 1;
     }
 
-    for (i=0; i<currmax; i++) {
+    for (i=0; i < currmax; i++) {
+
+	ptr = argv[optind+i];
+	nptr = strchr(ptr, ',');
 
 #ifdef DEBUG
-	printf("open %d '%s'.\n", i, argv[optind+i]);
+	printf("open %d '%s'.\n", i, ptr);
 #endif
 
-	if ((s[i] = socket(PF_CAN, SOCK_RAW, CAN_RAW)) < 0) {
+	s[i] = socket(PF_CAN, SOCK_RAW, CAN_RAW);
+	if (s[i] < 0) {
 	    perror("socket");
 	    return 1;
 	}
+
+	if (nptr)
+	    nbytes = nptr - ptr;  /* interface name is up the first ',' */
+	else
+	    nbytes = strlen(ptr); /* no ',' found => no filter definitions */
+
+	if (nbytes >= IFNAMSIZ) {
+	    printf("name of CAN device '%s' is too long!\n", ptr);
+	    return 1;
+	}
+
+	if (nbytes > max_devname_len)
+	    max_devname_len = nbytes; /* for nice printing */
+
+	addr.can_family = AF_CAN;
+
+	memset(&ifr.ifr_name, 0, sizeof(ifr.ifr_name));
+	strncpy(ifr.ifr_name, ptr, nbytes);
+
+#ifdef DEBUG
+	printf("using interface name '%s'.\n", ifr.ifr_name);
+#endif
+
+	if (strcmp(ANYDEV, ifr.ifr_name)) {
+	    if (ioctl(s[i], SIOCGIFINDEX, &ifr) < 0) {
+		perror("SIOCGIFINDEX");
+		exit(1);
+	    }
+	    addr.can_ifindex = ifr.ifr_ifindex;
+	} else
+	    addr.can_ifindex = 0; /* any can interface */
+
+	if (nptr) {
+
+	    /* found a ',' after the interface name => check for filters */
+
+	    numfilter = 0;
+	    err_mask = 0;
+
+	    while (nptr) {
+
+		ptr = nptr+1; /* hop behind the ',' */
+		nptr = strchr(ptr, ','); /* update exit condition */
+
+		if (sscanf(ptr, "%lx:%lx",
+			   (long unsigned int *)
+			   &rfilter[numfilter].can_id, 
+			   (long unsigned int *)
+			   &rfilter[numfilter].can_mask) == 2) {
+		    numfilter++;
+		} else if (sscanf(ptr, "%lx~%lx",
+				  (long unsigned int *)
+				  &rfilter[numfilter].can_id, 
+				  (long unsigned int *)
+				  &rfilter[numfilter].can_mask) == 2) {
+		    rfilter[numfilter].can_id |= CAN_INV_FILTER;
+		    numfilter++;
+		} else if (sscanf(ptr, "#%lx",
+				  (long unsigned int *)&err_mask) != 1) { 
+		    printf("Error in filter option parsing: '%s'\n", ptr);
+		    exit(1);
+		}
+
+		if (numfilter > MAXFILTER) {
+		    printf("Too many filters specified for '%s'.\n",
+			   ifr.ifr_name);
+		    exit(1);
+		}
+	    }
+
+	    if (err_mask)
+		setsockopt(s[i], SOL_CAN_RAW, CAN_RAW_ERR_FILTER,
+			   &err_mask, sizeof(err_mask));
+
+	    if (numfilter)
+		setsockopt(s[i], SOL_CAN_RAW, CAN_RAW_FILTER,
+			   &rfilter, numfilter * sizeof(struct can_filter));
+	} /* if (nptr) */
+
 #if 0
 	if (mask[i] || value[i]) {
 
@@ -320,28 +403,6 @@ int main(int argc, char **argv)
 	    setsockopt(s[i], SOL_CAN_RAW, CAN_RAW_ERR_FILTER,
 		       &err_mask[i], sizeof(err_mask[i]));
 #endif
-	j = strlen(argv[optind+i]);
-
-	if (!(j < IFNAMSIZ)) {
-	    printf("name of CAN device '%s' is too long!\n", argv[optind+i]);
-	    return 1;
-	}
-
-	if (j > max_devname_len)
-	    max_devname_len = j; /* for nice printing */
-
-	addr.can_family = AF_CAN;
-
-	if (strcmp(ANYDEV, argv[optind+i])) {
-	    strcpy(ifr.ifr_name, argv[optind+i]);
-	    if (ioctl(s[i], SIOCGIFINDEX, &ifr) < 0) {
-		perror("SIOCGIFINDEX");
-		exit(1);
-	    }
-	    addr.can_ifindex = ifr.ifr_ifindex;
-	}
-	else
-	    addr.can_ifindex = 0; /* any can interface */
 
 	if (bind(s[i], (struct sockaddr *)&addr, sizeof(addr)) < 0) {
 	    perror("bind");
@@ -397,9 +458,9 @@ int main(int argc, char **argv)
 		socklen_t len = sizeof(addr);
 		int idx;
 
-		if ((nbytes = recvfrom(s[i], &frame,
-				       sizeof(struct can_frame), 0,
-				       (struct sockaddr*)&addr, &len)) < 0) {
+		nbytes = recvfrom(s[i], &frame, sizeof(struct can_frame), 0,
+				  (struct sockaddr*)&addr, &len);
+		if (nbytes < 0) {
 		    perror("read");
 		    return 1;
 		}
@@ -410,8 +471,8 @@ int main(int argc, char **argv)
 		}
 
 		if (bridge) {
-		    if ((nbytes = write(bridge, &frame,
-					sizeof(struct can_frame))) < 0) {
+		    nbytes = write(bridge, &frame, sizeof(struct can_frame));
+		    if (nbytes < 0) {
 			perror("bridge write");
 			return 1;
 		    } else if (nbytes < sizeof(struct can_frame)) {
