@@ -67,9 +67,14 @@
 #include "terminal.h"
 #include "lib.h"
 
-#define MAXDEV 6 /* change sscanf()'s manually if changed here */
-#define ANYDEV "any"
-#define ANL "\r\n" /* newline in ASC mode */
+#define DEBUG
+
+#define MAXSOCK 16    /* max. number of CAN interfaces given on the cmdline */
+#define MAXFILTER 30  /* max. number of possible filters for each socket */
+#define MAXIFNAMES 30 /* size of receive name index to omit ioctls */
+#define MAXCOL 6      /* number of different colors for colorized output */
+#define ANYDEV "any"  /* name of interface to receive from any CAN interface */
+#define ANL "\r\n"    /* newline in ASC mode */
 
 #define BOLD    ATTBOLD
 #define RED     ATTBOLD FGRED
@@ -79,15 +84,15 @@
 #define MAGENTA ATTBOLD FGMAGENTA
 #define CYAN    ATTBOLD FGCYAN
 
-const char col_on [MAXDEV][19] = {BLUE, RED, GREEN, BOLD, MAGENTA, CYAN};
+const char col_on [MAXCOL][19] = {BLUE, RED, GREEN, BOLD, MAGENTA, CYAN};
 const char col_off [] = ATTRESET;
 
-static char devname[MAXDEV][IFNAMSIZ+1];
-static int  dindex[MAXDEV];
-static int  max_devname_len;
+static char devname[MAXIFNAMES][IFNAMSIZ+1];
+static int  dindex[MAXIFNAMES];
+static int  max_devname_len; /* to prevent frazzled device name output */ 
 
-#define MAXANI 8
-const char anichar[MAXANI] = {'|', '/', '-', '\\', '|', '/', '-', '\\'};
+#define MAXANI 4
+const char anichar[MAXANI] = {'|', '/', '-', '\\'};
 
 extern int optind, opterr, optopt;
 
@@ -97,12 +102,8 @@ void print_usage(char *prg)
 {
     fprintf(stderr, "\nUsage: %s [options] <CAN interface>+\n", prg);
     fprintf(stderr, "  (use CTRL-C to terminate %s)\n\n", prg);
-    fprintf(stderr, "Options: -m <mask>   (ID filter mask.  Default 0x00000000) *\n");
-    fprintf(stderr, "         -v <value>  (ID filter value. Default 0x00000000) *\n");
-    fprintf(stderr, "         -i <0|1>    (invert the specified ID filter) *\n");
-    fprintf(stderr, "         -e <emask>  (mask for error frames)\n");
-    fprintf(stderr, "         -t <type>   (timestamp: Absolute/Delta/Zero)\n");
-    fprintf(stderr, "         -c          (color mode)\n");
+    fprintf(stderr, "Options: -t <type>   (timestamp: Absolute/Delta/Zero)\n");
+    fprintf(stderr, "         -c          (increment color mode level)\n");
     fprintf(stderr, "         -a          (enable additional ASCII output)\n");
     fprintf(stderr, "         -s <level>  (silent mode - 1: animation 2: nothing)\n");
     fprintf(stderr, "         -b <can>    (bridge mode - send received frames to <can>)\n");
@@ -113,9 +114,7 @@ void print_usage(char *prg)
     fprintf(stderr, "* The CAN ID filter matches, when ...\n");
     fprintf(stderr, "       <received_can_id> & mask == value & mask\n");
     fprintf(stderr, "\n");
-    fprintf(stderr, "When using more than one CAN interface the options\n");
-    fprintf(stderr, "m/v/i/e have comma seperated values e.g. '-m 0,7FF,0'\n");
-    fprintf(stderr, "\nUse interface name '%s' to receive from all CAN interfaces.\n\n", ANYDEV);
+    fprintf(stderr, "Use interface name '%s' to receive from all CAN interfaces.\n\n", ANYDEV);
 }
 
 void sigterm(int signo)
@@ -128,7 +127,7 @@ int idx2dindex(int ifidx, int socket) {
     int i;
     struct ifreq ifr;
 
-    for (i=0; i<MAXDEV; i++) {
+    for (i=0; i<MAXIFNAMES; i++) {
 	if (dindex[i] == ifidx)
 	    return i;
     }
@@ -136,7 +135,7 @@ int idx2dindex(int ifidx, int socket) {
     /* create new interface index cache entry */
 
     /* remove index cache zombies first */
-    for (i=0; i < MAXDEV; i++) {
+    for (i=0; i < MAXIFNAMES; i++) {
 	if (dindex[i]) {
 	    ifr.ifr_ifindex = dindex[i];
 	    if (ioctl(socket, SIOCGIFNAME, &ifr) < 0)
@@ -144,12 +143,13 @@ int idx2dindex(int ifidx, int socket) {
 	}
     }
 
-    for (i=0; i < MAXDEV; i++)
+    for (i=0; i < MAXIFNAMES; i++)
 	if (!dindex[i]) /* free entry */
 	    break;
 
-    if (i == MAXDEV) {
-	printf("Interface index cache only supports %d interfaces.\n", MAXDEV);
+    if (i == MAXIFNAMES) {
+	printf("Interface index cache only supports %d interfaces.\n",
+	       MAXIFNAMES);
 	exit(1);
     }
 
@@ -174,12 +174,8 @@ int idx2dindex(int ifidx, int socket) {
 int main(int argc, char **argv)
 {
     fd_set rdfs;
-    int s[MAXDEV];
+    int s[MAXSOCK];
     int bridge = 0;
-    canid_t mask[MAXDEV] = {0};
-    canid_t value[MAXDEV] = {0};
-    int inv_filter[MAXDEV] = {0};
-    can_err_mask_t err_mask[MAXDEV] = {0};
     unsigned char timestamp = 0;
     unsigned char silent = 0;
     unsigned char silentani = 0;
@@ -188,9 +184,10 @@ int main(int argc, char **argv)
     unsigned char log = 0;
     unsigned char logfrmt = 0;
     int opt, ret;
-    int currmax = 1; /* we assume at least one can bus ;-) */
+    int currmax, numfilter;
     struct sockaddr_can addr;
-    struct can_filter rfilter;
+    struct can_filter rfilter[MAXFILTER];
+    can_err_mask_t err_mask;
     struct can_frame frame;
     int nbytes, i, j;
     struct ifreq ifr;
@@ -204,40 +201,8 @@ int main(int argc, char **argv)
     last_tv.tv_sec  = 0;
     last_tv.tv_usec = 0;
 
-    while ((opt = getopt(argc, argv, "m:v:i:e:t:cas:b:B:lL?")) != -1) {
+    while ((opt = getopt(argc, argv, "t:cas:b:B:lLh?")) != -1) {
 	switch (opt) {
-	case 'm':
-	    i = sscanf(optarg, "%x,%x,%x,%x,%x,%x",
-		       &mask[0], &mask[1], &mask[2],
-		       &mask[3], &mask[4], &mask[5]);
-	    if (i > currmax)
-		currmax = i;
-	    break;
-
-	case 'v':
-	    i = sscanf(optarg, "%x,%x,%x,%x,%x,%x",
-		       &value[0], &value[1], &value[2],
-		       &value[3], &value[4], &value[5]);
-	    if (i > currmax)
-		currmax = i;
-	    break;
-
-	case 'i':
-	    i = sscanf(optarg, "%d,%d,%d,%d,%d,%d",
-		       &inv_filter[0], &inv_filter[1], &inv_filter[2],
-		       &inv_filter[3], &inv_filter[4], &inv_filter[5]);
-	    if (i > currmax)
-		currmax = i;
-	    break;
-
-	case 'e':
-	    i = sscanf(optarg, "%x,%x,%x,%x,%x,%x",
-		       &err_mask[0], &err_mask[1], &err_mask[2],
-		       &err_mask[3], &err_mask[4], &err_mask[5]);
-	    if (i > currmax)
-		currmax = i;
-	    break;
-
 	case 't':
 	    timestamp = optarg[0];
 	    if ((timestamp != 'a') && (timestamp != 'A') &&
@@ -267,7 +232,8 @@ int main(int argc, char **argv)
 		return 1;
 	    }
 	    else {
-		if ((bridge = socket(PF_CAN, SOCK_RAW, CAN_RAW)) < 0) {
+		bridge = socket(PF_CAN, SOCK_RAW, CAN_RAW);
+		if (bridge < 0) {
 		    perror("bridge socket");
 		    return 1;
 		}
@@ -285,7 +251,8 @@ int main(int argc, char **argv)
 		if (opt == 'B') {
 		    int loopback = 0;
 
-		    setsockopt(bridge, SOL_CAN_RAW, CAN_RAW_LOOPBACK, &loopback, sizeof(loopback));
+		    setsockopt(bridge, SOL_CAN_RAW, CAN_RAW_LOOPBACK,
+			       &loopback, sizeof(loopback));
 		}
 
 		if (bind(bridge, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
@@ -315,32 +282,24 @@ int main(int argc, char **argv)
 	exit(0);
     }
 	
-    /* count in options higher than device count ? */
-    if (optind + currmax > argc) {
-	printf("low count of CAN devices!\n");
-	return 1;
-    }
-
     currmax = argc - optind; /* find real number of CAN devices */
 
-    if (currmax > MAXDEV) {
-	printf("More than %d CAN devices!\n", MAXDEV);
+    if (currmax > MAXSOCK) {
+	printf("More than %d CAN devices given on commandline!\n", MAXSOCK);
 	return 1;
     }
 
     for (i=0; i<currmax; i++) {
 
 #ifdef DEBUG
-	printf("open %d '%s' m%08X v%08X i%d e%d.\n",
-	       i, argv[optind+i], mask[i], value[i],
-	       inv_filter[i], err_mask[i]);
+	printf("open %d '%s'.\n", i, argv[optind+i]);
 #endif
 
 	if ((s[i] = socket(PF_CAN, SOCK_RAW, CAN_RAW)) < 0) {
 	    perror("socket");
 	    return 1;
 	}
-
+#if 0
 	if (mask[i] || value[i]) {
 
 	    printf("CAN ID filter[%d] for %s set to "
@@ -360,7 +319,7 @@ int main(int argc, char **argv)
 	if (err_mask[i])
 	    setsockopt(s[i], SOL_CAN_RAW, CAN_RAW_ERR_FILTER,
 		       &err_mask[i], sizeof(err_mask[i]));
-
+#endif
 	j = strlen(argv[optind+i]);
 
 	if (!(j < IFNAMSIZ)) {
@@ -492,7 +451,7 @@ int main(int argc, char **argv)
 		    goto out_fflush; /* no other output to stdout */
 		}
 		      
-		printf(" %s", (color>2)?col_on[idx]:"");
+		printf(" %s", (color>2)?col_on[idx%MAXCOL]:"");
 
 		switch (timestamp) {
 
@@ -535,7 +494,7 @@ int main(int argc, char **argv)
 		    break;
 		}
 
-		printf(" %s", (color && (color<3))?col_on[idx]:"");
+		printf(" %s", (color && (color<3))?col_on[idx%MAXCOL]:"");
 		printf("%*s", max_devname_len, devname[idx]);
 		printf("%s  ", (color==1)?col_off:"");
 
