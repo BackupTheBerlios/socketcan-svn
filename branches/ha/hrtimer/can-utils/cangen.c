@@ -120,9 +120,6 @@ void print_usage(char *prg)
 void sigterm(int signo)
 {
     running = 0;
-
-    if (enobufs_count)
-	printf("\nCounted %llu ENOBUFS.\n", enobufs_count);
 }
 
 int main(int argc, char **argv)
@@ -329,7 +326,7 @@ int main(int argc, char **argv)
 
 	nbytes = write(s, &frame, sizeof(struct can_frame));
 	if (nbytes < 0) {
-	    if (nbytes != -ENOBUFS) {
+	    if (errno != ENOBUFS) {
 		perror("write");
 		return 1;
 	    }
@@ -376,6 +373,10 @@ int main(int argc, char **argv)
 		frame.data[i] = (incdata >> i*8) & 0xFFULL;
 	}
     }
+
+    if (enobufs_count)
+	printf("\nCounted %llu ENOBUFS return values on write().\n\n",
+	       enobufs_count);
 
     close(s);
 
