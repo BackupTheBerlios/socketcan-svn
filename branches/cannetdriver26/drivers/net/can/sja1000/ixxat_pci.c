@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2007 Wolfgang Grandegger <wg@grandegger.com>
+ * Copyright (C) 2008 Sascha Hauer <s.hauer@pengutronix.de>, Pengutronix
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the version 2 of the GNU General Public License
@@ -27,19 +28,24 @@
 
 #include "sja1000.h"
 
-
 #define DRV_NAME  "can-ixxat-pci"
 
-MODULE_AUTHOR("Wolfgang Grandegger <wg@grandegger.com>");
+MODULE_AUTHOR("Sascha Hauer <s.hauer@pengutronix.de");
 MODULE_DESCRIPTION("Socket-CAN driver for IXXAT PC-I 04/PCI PCI cards");
 MODULE_SUPPORTED_DEVICE("IXXAT PC-I 04/PCI card");
 MODULE_LICENSE("GPL v2");
 
+/* Maximum number of interfaces supported on one card. Currently
+ * we only support a maximum of two interfaces, which is the maximum
+ * of what Ixxat sells anyway.
+ */
+#define IXXAT_PCI_MAX_CAN 2
+
 struct ixxat_pci {
-	int channel;
 	struct pci_dev *pci_dev;
-	struct net_device *slave_dev;
+	struct net_device *dev[IXXAT_PCI_MAX_CAN];
 	int conf_addr;
+	void __iomem *base_addr;
 };
 
 #define IXXAT_PCI_CAN_CLOCK  (16000000 / 2)
@@ -48,25 +54,20 @@ struct ixxat_pci {
 			      OCR_TX1_PUSHPULL)
 #define IXXAT_PCI_CDR	     0
 
-#define IXXAT_PCI_SINGLE     0 /* this is a single channel device */
-#define IXXAT_PCI_MASTER     1 /* multi channel master device */
-#define IXXAT_PCI_SLAVE      2 /* multi channel slave device */
-
-#define CHANNEL_OFFSET       0x200
-#define CHANNEL_MASTER_RESET 0x110
-#define CHANNEL_SLAVE_RESET  (CHANNEL_MASTER_RESET + CHANNEL_OFFSET)
+#define CHANNEL_RESET_OFFSET 0x110
+#define CHANNEL_OFFSET      0x200
 
 #define INTCSR_OFFSET        0x4c /* Offset in PLX9050 conf registers */
-#define INTCSR_MASTER        0x41 /* LINT1 and PCI interrupt enabled */
-#define INTCSR_SLAVE         0x08 /* LINT2 enabled */
+#define INTCSR_LINTI1        (1 << 0)
+#define INTCSR_LINTI2        (1 << 3)
+#define INTCSR_PCI           (1 << 6)
 
 /* PCI vender, device and sub-device ID */
 #define IXXAT_PCI_VENDOR_ID  0x10b5
 #define IXXAT_PCI_DEVICE_ID  0x9050
 #define IXXAT_PCI_SUB_SYS_ID 0x2540
 
-#define IXXAT_PCI_CONF_SIZE  0x0080
-#define IXXAT_PCI_BASE_SIZE  0x0400
+#define IXXAT_PCI_BASE_SIZE  0x400
 
 static struct pci_device_id ixxat_pci_tbl[] = {
 	{IXXAT_PCI_VENDOR_ID, IXXAT_PCI_DEVICE_ID, PCI_ANY_ID, PCI_ANY_ID,},
@@ -75,74 +76,41 @@ static struct pci_device_id ixxat_pci_tbl[] = {
 
 MODULE_DEVICE_TABLE(pci, ixxat_pci_tbl);
 
-static u8 ixxat_pci_read_reg(struct net_device *dev, int port)
+static u8 ixxat_pci_read_reg(struct net_device *ndev, int port)
 {
 	u8 val;
-	val = readb((const volatile void __iomem *)(dev->base_addr + port));
+	val = readb((void __iomem *)(ndev->base_addr + port));
 	return val;
 }
 
-static void ixxat_pci_write_reg(struct net_device *dev, int port, u8 val)
+static void ixxat_pci_write_reg(struct net_device *ndev, int port, u8 val)
 {
-	writeb(val, (volatile void __iomem *)(dev->base_addr + port));
+	writeb(val, (void __iomem *)(ndev->base_addr + port));
 }
 
-static void ixxat_pci_del_chan(struct net_device *dev)
+static void ixxat_pci_del_chan(struct pci_dev *pdev, struct net_device *ndev)
 {
-	struct sja1000_priv *priv = netdev_priv(dev);
-	struct ixxat_pci *board;
-	u8 intcsr;
+	dev_info(&pdev->dev, "Removing device %s\n", ndev->name);
 
-	if (!dev || !(priv = netdev_priv(dev)) || !(board = priv->priv))
-		return;
+	unregister_sja1000dev(ndev);
 
-	printk("Removing %s device %s\n", DRV_NAME, dev->name);
-	unregister_sja1000dev(dev);
-
-	/* Disable PCI interrupts */
-	intcsr = inb(board->conf_addr + INTCSR_OFFSET);
-	if (board->slave_dev) {
-		intcsr &= ~INTCSR_MASTER;
-		outb(intcsr, board->conf_addr + INTCSR_OFFSET);
-		writeb(0x1, (volatile void __iomem *)
-		       (dev->base_addr + CHANNEL_MASTER_RESET));
-	} else {
-		intcsr &= ~INTCSR_SLAVE;
-		outb(intcsr, board->conf_addr + INTCSR_OFFSET);
-		writeb(0x1, (volatile void __iomem *)
-		       (dev->base_addr + CHANNEL_SLAVE_RESET));
-		iounmap((void *)dev->base_addr);
-	}
-	free_sja1000dev(dev);
+	free_sja1000dev(ndev);
 }
 
-static int ixxat_pci_add_chan(struct pci_dev *pdev, int channel,
-			      struct net_device **master_dev,
-			      int conf_addr,
-			      volatile void __iomem *base_addr)
+static struct net_device *ixxat_pci_add_chan(struct pci_dev *pdev,
+		void __iomem *base_addr)
 {
-	struct net_device *dev;
+	struct net_device *ndev;
 	struct sja1000_priv *priv;
-	struct ixxat_pci *board;
-	u8 intcsr;
 	int err;
 
-	dev = alloc_sja1000dev(sizeof(struct ixxat_pci));
-	if (dev == NULL)
-		return -ENOMEM;
+	ndev = alloc_sja1000dev(0);
+	if (ndev == NULL)
+		return ERR_PTR(-ENOMEM);
 
-	priv = netdev_priv(dev);
-	board = priv->priv;
+	priv = netdev_priv(ndev);
 
-	board->pci_dev = pdev;
-	board->conf_addr = conf_addr;
-	dev->base_addr = (unsigned long)base_addr;
-
-	if (channel == IXXAT_PCI_SLAVE) {
-		struct sja1000_priv *master_priv = netdev_priv(*master_dev);
-		struct ixxat_pci *master_board = master_priv->priv;
-		master_board->slave_dev = dev;
-	}
+	ndev->base_addr = (unsigned long)base_addr;
 
 	priv->read_reg = ixxat_pci_read_reg;
 	priv->write_reg = ixxat_pci_write_reg;
@@ -153,47 +121,40 @@ static int ixxat_pci_add_chan(struct pci_dev *pdev, int channel,
 	priv->cdr = IXXAT_PCI_CDR;
 
 	/* Set and enable PCI interrupts */
-	dev->irq = pdev->irq;
-	intcsr = inb(board->conf_addr + INTCSR_OFFSET);
-	if (channel == IXXAT_PCI_SLAVE)
-		intcsr |= INTCSR_SLAVE;
-	else
-		intcsr |= INTCSR_MASTER;
-	outb(intcsr, board->conf_addr + INTCSR_OFFSET);
+	ndev->irq = pdev->irq;
 
-	printk("%s: base_addr=%#lx conf_addr=%#x irq=%d\n", DRV_NAME,
-	       dev->base_addr, board->conf_addr, dev->irq);
+	dev_dbg(&pdev->dev, "base_addr=%#lx irq=%d\n",
+			ndev->base_addr, ndev->irq);
 
-	SET_NETDEV_DEV(dev, &pdev->dev);
+	SET_NETDEV_DEV(ndev, &pdev->dev);
 
-	err = register_sja1000dev(dev);
+	err = register_sja1000dev(ndev);
 	if (err) {
-		printk(KERN_ERR "Registering %s failed (err=%d)\n",
-		       DRV_NAME, err);
+		dev_err(&pdev->dev, "Failed to register (err=%d)\n", err);
 		goto failure;
 	}
 
-	if (channel != IXXAT_PCI_SLAVE)
-		*master_dev = dev;
-
-	return 0;
+	return ndev;
 
 failure:
-	free_sja1000dev(dev);
-	return err;
+	free_sja1000dev(ndev);
+	return ERR_PTR(err);
 }
 
 static int __devinit ixxat_pci_init_one(struct pci_dev *pdev,
 				       const struct pci_device_id *ent)
 {
-	struct net_device *master_dev = NULL;
-	volatile void __iomem *base_addr;
-	unsigned long addr;
-	int conf_addr, channel, err;
+	struct ixxat_pci *board;
+	int err, intcsr = INTCSR_LINTI1 | INTCSR_PCI;
 	u16 sub_sys_id;
+	void __iomem *base_addr;
 
-	printk("%s: initializing device %04x:%04x\n",
-	       DRV_NAME, pdev->vendor, pdev->device);
+	dev_info(&pdev->dev, "Initializing device %04x:%04x\n",
+	       pdev->vendor, pdev->device);
+
+	board = kzalloc(sizeof(*board), GFP_KERNEL);
+	if (!board)
+		return -ENOMEM;
 
 	if ((err = pci_enable_device(pdev)))
 		goto failure;
@@ -211,66 +172,79 @@ static int __devinit ixxat_pci_init_one(struct pci_dev *pdev,
 	if ((err = pci_write_config_word(pdev, 0x04, 0x3)))
 		goto failure_release_pci;
 
-	conf_addr = pci_resource_start(pdev, 1);
+	board->conf_addr = pci_resource_start(pdev, 1);
 
-	addr = pci_resource_start(pdev, 2);
-	base_addr = ioremap(addr, IXXAT_PCI_BASE_SIZE);
+	base_addr = pci_iomap(pdev, 2, IXXAT_PCI_BASE_SIZE);
 	if (base_addr == 0) {
 		err = -ENODEV;
 		goto failure_release_pci;
 	}
 
-	/* Check if second channel is available after reset */
-	writeb(0x1, (volatile void __iomem *)base_addr + CHANNEL_MASTER_RESET);
-	writeb(0x1, (volatile void __iomem *)base_addr + CHANNEL_SLAVE_RESET);
-	udelay(100);
-	if (readb(base_addr + CHANNEL_OFFSET + REG_MOD) != 0x21 ||
-	    readb(base_addr + CHANNEL_OFFSET + REG_SR ) != 0x0c ||
-	    readb(base_addr + CHANNEL_OFFSET + REG_IR ) != 0xe0)
-		channel = IXXAT_PCI_SINGLE;
-	else
-		channel = IXXAT_PCI_MASTER;
+	board->base_addr = base_addr;
 
-	if ((err = ixxat_pci_add_chan(pdev, channel, &master_dev,
-				      conf_addr, base_addr)))
+	writeb(0x1, base_addr + CHANNEL_RESET_OFFSET);
+	writeb(0x1, base_addr + CHANNEL_OFFSET + CHANNEL_RESET_OFFSET);
+	udelay(100);
+
+	board->dev[0] = ixxat_pci_add_chan(pdev, base_addr);
+	if (IS_ERR(board->dev[0]))
 		goto failure_iounmap;
 
-	if (channel != IXXAT_PCI_SINGLE) {
-		channel = IXXAT_PCI_SLAVE;
-		if ((err = ixxat_pci_add_chan(pdev, channel,
-					      &master_dev, conf_addr,
-					      base_addr + CHANNEL_OFFSET)))
-			goto failure_iounmap;
+	/* Check if second channel is available */
+	if (readb(base_addr + CHANNEL_OFFSET + REG_MOD) == 0x21 &&
+	    readb(base_addr + CHANNEL_OFFSET + REG_SR) == 0x0c &&
+	    readb(base_addr + CHANNEL_OFFSET + REG_IR) == 0xe0) {
+		board->dev[1] = ixxat_pci_add_chan(pdev,
+				base_addr + CHANNEL_OFFSET);
+		if (IS_ERR(board->dev[1]))
+			goto failure_unreg_dev0;
+
+		intcsr |= INTCSR_LINTI2;
 	}
 
-	pci_set_drvdata(pdev, master_dev);
+	/* enable interrupt(s) in PLX9050 */
+	outb(intcsr, board->conf_addr + INTCSR_OFFSET);
+
+	pci_set_drvdata(pdev, board);
+
 	return 0;
 
+failure_unreg_dev0:
+	ixxat_pci_del_chan(pdev, board->dev[0]);
+
 failure_iounmap:
-	if (master_dev)
-		ixxat_pci_del_chan(master_dev);
-	iounmap(base_addr);
+	pci_iounmap(pdev, board->base_addr);
 
 failure_release_pci:
 	pci_release_regions(pdev);
 
 failure:
+	kfree(board);
+
 	return err;
 }
 
 static void __devexit ixxat_pci_remove_one(struct pci_dev *pdev)
 {
-	struct net_device *dev = pci_get_drvdata(pdev);
-	struct sja1000_priv *priv = netdev_priv(dev);
-	struct ixxat_pci *board = priv->priv;
+	struct ixxat_pci *board = pci_get_drvdata(pdev);
+	int i;
 
-	if (board->slave_dev)
-		ixxat_pci_del_chan(board->slave_dev);
-	ixxat_pci_del_chan(dev);
+	/* Disable interrupts in PLX9050*/
+	outb(0, board->conf_addr + INTCSR_OFFSET);
+
+	for (i = 0; i < IXXAT_PCI_MAX_CAN; i++) {
+		if (!board->dev[i])
+			break;
+		ixxat_pci_del_chan(pdev, board->dev[i]);
+	}
+
+	pci_iounmap(pdev, board->base_addr);
 
 	pci_release_regions(pdev);
 	pci_disable_device(pdev);
 	pci_set_drvdata(pdev, NULL);
+
+	kfree(board);
 }
 
 static struct pci_driver ixxat_pci_driver = {
