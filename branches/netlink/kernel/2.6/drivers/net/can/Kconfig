@@ -1,0 +1,199 @@
+menu "CAN Device Drivers"
+	depends on CAN
+
+config CAN_VCAN
+	tristate "Virtual Local CAN Interface (vcan)"
+	depends on CAN
+	default N
+	---help---
+	  Similar to the network loopback devices, vcan offers a
+	  virtual local CAN interface.
+
+	  This driver can also be built as a module.  If so, the module
+	  will be called vcan.
+
+config CAN_SLCAN
+	tristate "Serial / USB serial CAN Adaptors (slcan)"
+	depends on CAN && EXPERIMENTAL
+	default N
+	---help---
+	  CAN driver for several 'low cost' CAN interfaces that are attached
+	  via serial lines or via USB-to-serial adapters using the LAWICEL
+	  ASCII protocol. The driver implements the tty linediscipline N_SLCAN.
+
+	  This driver can also be built as a module.  If so, the module
+	  will be called slcan.
+
+config CAN_OLD_DRIVERS
+	tristate "Prompt for old CAN drivers (e.g. no sysfs support)"
+	depends on CAN
+	default N
+	---help---
+	  The old drivers do not support sysfs nor proper platform device
+	  support. Some of the old drivers might only be configured by
+	  module commandline options.
+
+if CAN_OLD_DRIVERS
+source "drivers/net/can/old/Kconfig"
+endif
+
+config CAN_DEV
+	tristate "Prompt for platform CAN drivers with sysfs support"
+	depends on CAN && SYSFS
+	default Y
+	---help---
+	  Enables the common framework for platform CAN drivers with sysfs
+	  support. This is the standard library for CAN drivers.
+	  If unsure, say Y.
+
+config CAN_CALC_BITTIMING
+	bool "CAN bit-timing calculation"
+	depends on CAN_DEV
+	default Y
+	---help---
+	  If enabled, CAN bit-timing parameters will be calculated for the
+	  bit-rate specified via SYSFS file "bitrate" when the device gets
+	  started. This works fine for the most common CAN controllers
+	  with standard bit-rates but may fail for exotic bit-rates or CAN
+	  source clock frequencies. Disabling saves some space, but then the
+	  bit-timing parameters must be specified directly using the SYSFS
+	  files "tq", "prop_seg", "phase_seg1", "phase_seg2" and "sjw".
+	  If unsure, say Y.
+
+config CAN_SJA1000
+	depends on CAN_DEV
+	tristate "Philips SJA1000"
+	---help---
+	  The SJA1000 is one of the top CAN controllers out there. As it
+	  has a multiplexed interface it fits directly to 8051
+	  microcontrollers or into the PC I/O port space. The SJA1000
+	  is a full CAN controller, with shadow registers for RX and TX.
+	  It can send and receive any kinds of CAN frames (SFF/EFF/RTR)
+	  with a single (simple) filter setup.
+
+	  This driver will use the new device interface.
+
+config CAN_SJA1000_PLATFORM
+	depends on CAN_SJA1000
+	tristate "generic Platform Bus based SJA1000 driver"
+	---help---
+	  This driver adds support for the SJA1000 chips connected to
+	  the "platform bus" (Linux abstraction for directly to the
+	  processor attached devices).	Which can be found on various
+	  boards from Phytec (http://www.phytec.de) like the PCM027,
+	  PCM038.
+
+config CAN_SJA1000_OF_PLATFORM
+	depends on CAN_SJA1000 && PPC_OF
+	tristate "generic OF Platform Bus based SJA1000 driver"
+	---help---
+	  This driver adds support for the SJA1000 chips connected to
+	  the OpenFirmware "platform bus" found on embedded systems with
+	  OpenFirmware bindings, e.g. if you have a PowerPC based system
+	  you should enable this option.
+
+config CAN_EMS_PCI
+	tristate "EMS CPC-PCI and CPC-PCIe Card"
+	depends on PCI && CAN_SJA1000
+	---help---
+	  This driver is for the one or two channel CPC-PCI and CPC-PCIe
+	  cards from EMS Dr. Thomas Wuensche (http://www.ems-wuensche.de).
+
+config CAN_EMS_PCMCIA
+	tristate "EMS CPC-CARD Card"
+	depends on PCMCIA && CAN_SJA1000
+	---help---
+	  This driver is for the one or two channel CPC-CARD cards from
+	  EMS Dr. Thomas Wuensche (http://www.ems-wuensche.de).
+
+config CAN_ESD_PCI
+	tristate "ESD PCI Cards"
+	depends on PCI && CAN_SJA1000
+	---help---
+	  This driver supports the esd PCI CAN cards CAN-PCI/200, 
+	  CAN-PCI/266, CAN-PMC/266 (PMC), CAN-CPCI/200 (CompactPCI), 
+	  CAN-PCIe2000 (PCI Express) and CAN-PCI104/200 (PCI104) 
+	  from the esd electronic system design gmbh (http://www.esd.eu).
+
+config CAN_IXXAT_PCI
+	tristate "IXXAT PCI Card"
+	depends on PCI && CAN_SJA1000
+	---help---
+	  This driver is for the IXXAT PC-I 04/PCI card (1 or 2 channel)
+	  from the IXXAT Automation GmbH (http://www.ixxat.de).
+
+config CAN_PEAK_PCI
+	tristate "PEAK PCAN PCI Card"
+	depends on PCI && CAN_SJA1000
+	---help---
+	  This driver is for the PCAN PCI, the PC-PCI CAN plug-in card (1 or
+	  2 channel) from PEAK Systems (http://www.peak-system.com).
+
+config CAN_PIPCAN
+	depends on CAN_SJA1000
+	tristate "MPL PIPCAN CAN module driver (SJA1000)"
+	---help---
+	  This driver adds support for the PIPCAN module used on some SBC
+	  boards from MPL AG (http://www.mpl.ch).
+
+config CAN_KVASER_PCI
+	tristate "Kvaser PCIcanx and Kvaser PCIcan PCI Cards"
+	depends on PCI && CAN_SJA1000
+	---help---
+	  This driver is for the the PCIcanx and PCIcan cards (1, 2 or
+	  4 channel) from Kvaser (http://www.kvaser.com).
+
+config CAN_SOFTING
+	tristate "Softing Gmbh CAN generic support"
+	depends on CAN_DEV
+	---help---
+	  generic softing CAN cards
+
+config CAN_SOFTING_CS
+	tristate "Softing CAN pcmcia cards"
+	depends on CAN_SOFTING && PCMCIA
+
+config CAN_MSCAN
+	depends on CAN_DEV && (PPC || M68K || M68KNOMMU)
+	tristate "Support for a Freescale MSCAN based chips"
+	---help---
+	  The Motorola Scalable Controller Area Network (MSCAN) definition
+	  is based on the MSCAN12 definition which is the specific
+	  implementation of the Motorola Scalable CAN concept targeted for
+	  the Motorola MC68HC12 Microcontroller Family.
+
+config CAN_MPC52XX
+	tristate "Freescale MPC5200 onboard CAN controller"
+	depends on CAN_MSCAN && (PPC_MPC52xx || PPC_52xx)
+	default LITE5200
+	---help---
+	  If you say yes here you get support for Freescale MPC5200
+	  onboard dualCAN controller.
+
+	  This driver can also be built as a module.  If so, the module
+	  will be called mpc52xx_can.
+
+config CAN_AT91
+	tristate "Atmel AT91 onchip CAN controller"
+	depends on CAN && ARCH_AT91SAM9263
+	default N
+	---help---
+	  This is a driver for the SoC CAN controller in Atmel's AT91SAM9263.
+
+config CAN_MCP251X
+	tristate "Microchip MCP251x SPI CAN controllers"
+	depends on CAN_DEV && SPI
+	---help---
+	  Driver for the Microchip MCP251x SPI CAN controllers.
+
+config CAN_DEBUG_DEVICES
+	bool "CAN devices debugging messages"
+	depends on CAN
+	default N
+	---help---
+	  Say Y here if you want the CAN device drivers to produce a bunch of
+	  debug messages to the system log.  Select this if you are having
+	  a problem with CAN support and want to see more of what is going
+	  on.
+
+endmenu
