@@ -384,8 +384,8 @@ static int __devinit mpc52xx_can_probe(struct of_device *ofdev,
 		clock_src = MSCAN_CLKSRC_BUS;
 	else
 		clock_src = MSCAN_CLKSRC_XTAL;
-	priv->bittiming.clock = mpc52xx_can_clock_freq(np, clock_src);
-	if (!priv->bittiming.clock) {
+	priv->clock.freq = mpc52xx_can_clock_freq(np, clock_src);
+	if (!priv->clock.freq) {
 		dev_err(&ofdev->dev, "couldn't get MSCAN clock frequency\n");
 		err = -ENODEV;
 		goto exit_free_mscan;
@@ -403,7 +403,7 @@ static int __devinit mpc52xx_can_probe(struct of_device *ofdev,
 	dev_set_drvdata(&ofdev->dev, dev);
 
 	dev_info(&ofdev->dev, "MSCAN at 0x%lx, irq %d, clock %d Hz\n",
-		 dev->base_addr, dev->irq, priv->bittiming.clock);
+		 dev->base_addr, dev->irq, priv->clock.freq);
 
 	return 0;
 

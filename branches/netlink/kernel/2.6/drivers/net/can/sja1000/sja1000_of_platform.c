@@ -56,12 +56,12 @@ MODULE_LICENSE("GPL v2");
 #define SJA1000_OFP_OCR        OCR_TX0_PULLDOWN
 #define SJA1000_OFP_CDR        (CDR_CBP | CDR_CLK_OFF)
 
-static u8 sja1000_ofp_read_reg(struct net_device *dev, int reg)
+static u8 sja1000_ofp_read_reg(const struct net_device *dev, int reg)
 {
 	return in_8((void __iomem *)(dev->base_addr + reg));
 }
 
-static void sja1000_ofp_write_reg(struct net_device *dev, int reg, u8 val)
+static void sja1000_ofp_write_reg(const struct net_device *dev, int reg, u8 val)
 {
 	out_8((void __iomem *)(dev->base_addr + reg), val);
 }
@@ -138,9 +138,9 @@ static int __devinit sja1000_ofp_probe(struct of_device *ofdev,
 
 	prop = of_get_property(np, "clock-frequency", &prop_size);
 	if (prop && (prop_size ==  sizeof(u32)))
-		priv->can.bittiming.clock = *prop;
+		priv->can.clock.freq = *prop;
 	else
-		priv->can.bittiming.clock = SJA1000_OFP_CAN_CLOCK;
+		priv->can.clock.freq = SJA1000_OFP_CAN_CLOCK;
 
 	prop = of_get_property(np, "ocr-reg", &prop_size);
 	if (prop && (prop_size == sizeof(u32)))
@@ -154,12 +154,18 @@ static int __devinit sja1000_ofp_probe(struct of_device *ofdev,
 	else
 		priv->cdr = SJA1000_OFP_CDR;
 
-	dev->base_addr = (unsigned long)base;
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,18)
+	priv->irq_flags = SA_SHIRQ;
+#else
+	priv->irq_flags = IRQF_SHARED;
+#endif
+
 	dev->irq = irq;
+	dev->base_addr = (unsigned long)base;
 
 	dev_info(&ofdev->dev,
 		 "base=0x%lx irq=%d clock=%d ocr=0x%02x cdr=0x%02x\n",
-		 dev->base_addr, dev->irq, priv->can.bittiming.clock,
+		 dev->base_addr, dev->irq, priv->can.clock.freq,
 		 priv->ocr, priv->cdr);
 
 	dev_set_drvdata(&ofdev->dev, dev);

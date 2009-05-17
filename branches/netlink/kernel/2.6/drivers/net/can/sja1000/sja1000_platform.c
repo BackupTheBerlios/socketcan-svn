@@ -37,19 +37,19 @@ MODULE_AUTHOR("Sascha Hauer <s.hauer@pengutronix.de>");
 MODULE_DESCRIPTION("Socket-CAN driver for SJA1000 on the platform bus");
 MODULE_LICENSE("GPL v2");
 
-static u8 sp_read_reg(struct net_device *dev, int reg)
+static u8 sp_read_reg(const struct net_device *dev, int reg)
 {
 	return ioread8((void __iomem *)(dev->base_addr + reg));
 }
 
-static void sp_write_reg(struct net_device *dev, int reg, u8 val)
+static void sp_write_reg(const struct net_device *dev, int reg, u8 val)
 {
 	iowrite8(val, (void __iomem *)(dev->base_addr + reg));
 }
 
 static int sp_probe(struct platform_device *pdev)
 {
-	int err, irq;
+	int err;
 	void __iomem *addr;
 	struct net_device *dev;
 	struct sja1000_priv *priv;
@@ -70,23 +70,17 @@ static int sp_probe(struct platform_device *pdev)
 		goto exit;
 	}
 
-	if (!request_mem_region(res_mem->start,
-				res_mem->end - res_mem->start + 1,
+	if (!request_mem_region(res_mem->start, resource_size(res_mem),
 				DRV_NAME)) {
 		err = -EBUSY;
 		goto exit;
 	}
 
-	addr = ioremap_nocache(res_mem->start,
-			       res_mem->end - res_mem->start + 1);
+	addr = ioremap_nocache(res_mem->start, resource_size(res_mem));
 	if (!addr) {
 		err = -ENOMEM;
 		goto exit_release;
 	}
-
-	irq = res_irq->start;
-	if (res_irq->flags & IRQF_TRIGGER_MASK)
-		set_irq_type(irq, res_irq->flags & IRQF_TRIGGER_MASK);
 
 	dev = alloc_sja1000dev(0);
 	if (!dev) {
@@ -95,14 +89,14 @@ static int sp_probe(struct platform_device *pdev)
 	}
 	priv = netdev_priv(dev);
 
+	dev->base_addr = (unsigned long)addr;
+	dev->irq = res_irq->start;
+	priv->irq_flags = res_irq->flags & IRQF_TRIGGER_MASK;
 	priv->read_reg = sp_read_reg;
 	priv->write_reg = sp_write_reg;
-	priv->can.bittiming.clock = pdata->clock;
+	priv->can.clock.freq = pdata->clock;
 	priv->ocr = pdata->ocr;
 	priv->cdr = pdata->cdr;
-
-	dev->irq = irq;
-	dev->base_addr = (unsigned long)addr;
 
 	dev_set_drvdata(&pdev->dev, dev);
 	SET_NETDEV_DEV(dev, &pdev->dev);
@@ -123,7 +117,7 @@ static int sp_probe(struct platform_device *pdev)
  exit_iounmap:
 	iounmap(addr);
  exit_release:
-	release_mem_region(res_mem->start, res_mem->end - res_mem->start + 1);
+	release_mem_region(res_mem->start, resource_size(res_mem));
  exit:
 	return err;
 }
@@ -135,11 +129,12 @@ static int sp_remove(struct platform_device *pdev)
 
 	unregister_sja1000dev(dev);
 	dev_set_drvdata(&pdev->dev, NULL);
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	release_mem_region(res->start, res->end - res->start + 1);
 
 	if (dev->base_addr)
 		iounmap((void __iomem *)dev->base_addr);
+
+	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+	release_mem_region(res->start, resource_size(res));
 
 	free_sja1000dev(dev);
 

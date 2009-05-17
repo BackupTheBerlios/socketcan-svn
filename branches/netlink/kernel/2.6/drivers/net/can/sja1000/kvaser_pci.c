@@ -53,8 +53,7 @@ MODULE_DESCRIPTION("Socket-CAN driver for KVASER PCAN PCI cards");
 MODULE_SUPPORTED_DEVICE("KVASER PCAN PCI CAN card");
 MODULE_LICENSE("GPL v2");
 
-#define MAX_NO_OF_CHANNELS        4 /* max no of channels on
-				       a single card */
+#define MAX_NO_OF_CHANNELS        4 /* max no of channels on a single card */
 
 struct kvaser_pci {
 	int channel;
@@ -122,12 +121,12 @@ static struct pci_device_id kvaser_pci_tbl[] = {
 
 MODULE_DEVICE_TABLE(pci, kvaser_pci_tbl);
 
-static u8 kvaser_pci_read_reg(struct net_device *dev, int port)
+static u8 kvaser_pci_read_reg(const struct net_device *dev, int port)
 {
 	return ioread8((void __iomem *)(dev->base_addr + port));
 }
 
-static void kvaser_pci_write_reg(struct net_device *dev, int port, u8 val)
+static void kvaser_pci_write_reg(const struct net_device *dev, int port, u8 val)
 {
 	iowrite8(val, (void __iomem *)(dev->base_addr + port));
 }
@@ -136,24 +135,24 @@ static void kvaser_pci_disable_irq(struct net_device *dev)
 {
 	struct sja1000_priv *priv = netdev_priv(dev);
 	struct kvaser_pci *board = priv->priv;
-	u32 tmp;
+	u32 intcsr;
 
 	/* Disable interrupts from card */
-	tmp = ioread32(board->conf_addr + S5920_INTCSR);
-	tmp &= ~INTCSR_ADDON_INTENABLE_M;
-	iowrite32(tmp, board->conf_addr + S5920_INTCSR);
+	intcsr = ioread32(board->conf_addr + S5920_INTCSR);
+	intcsr &= ~INTCSR_ADDON_INTENABLE_M;
+	iowrite32(intcsr, board->conf_addr + S5920_INTCSR);
 }
 
 static void kvaser_pci_enable_irq(struct net_device *dev)
 {
 	struct sja1000_priv *priv = netdev_priv(dev);
 	struct kvaser_pci *board = priv->priv;
-	u32 tmp;
+	u32 tmp_en_io;
 
 	/* Enable interrupts from card */
-	tmp = ioread32(board->conf_addr + S5920_INTCSR);
-	tmp |= INTCSR_ADDON_INTENABLE_M;
-	iowrite32(tmp, board->conf_addr + S5920_INTCSR);
+	tmp_en_io = ioread32(board->conf_addr + S5920_INTCSR);
+	tmp_en_io |= INTCSR_ADDON_INTENABLE_M;
+	iowrite32(tmp_en_io, board->conf_addr + S5920_INTCSR);
 }
 
 static int number_of_sja1000_chip(void __iomem *base_addr)
@@ -167,7 +166,6 @@ static int number_of_sja1000_chip(void __iomem *base_addr)
 			 (i * KVASER_PCI_PORT_BYTES) + REG_MOD);
 		status = ioread8(base_addr +
 				 (i * KVASER_PCI_PORT_BYTES) + REG_MOD);
-		udelay(10);
 		/* check reset bit */
 		if (!(status & MOD_RM))
 			break;
@@ -185,14 +183,15 @@ static void kvaser_pci_del_chan(struct net_device *dev)
 	if (!dev)
 		return;
 	priv = netdev_priv(dev);
-	if (!priv)
-		return;
 	board = priv->priv;
 	if (!board)
 		return;
 
 	dev_info(&board->pci_dev->dev, "Removing device %s\n",
 		 dev->name);
+
+	/* Disable PCI interrupts */
+	kvaser_pci_disable_irq(dev);
 
 	for (i = 0; i < board->no_channels - 1; i++) {
 		if (board->slave_dev[i]) {
@@ -203,9 +202,6 @@ static void kvaser_pci_del_chan(struct net_device *dev)
 		}
 	}
 	unregister_sja1000dev(dev);
-
-	/* Disable PCI interrupts */
-	kvaser_pci_disable_irq(dev);
 
 	pci_iounmap(board->pci_dev, (void __iomem *)dev->base_addr);
 	pci_iounmap(board->pci_dev, board->conf_addr);
@@ -235,10 +231,10 @@ static int kvaser_pci_add_chan(struct pci_dev *pdev, int channel,
 	board->pci_dev = pdev;
 	board->channel = channel;
 
-	/*S5920*/
+	/* S5920 */
 	board->conf_addr = conf_addr;
 
-	/*XILINX board wide address*/
+	/* XILINX board wide address */
 	board->res_addr = res_addr;
 
 	if (channel == 0) {
@@ -250,8 +246,6 @@ static int kvaser_pci_add_chan(struct pci_dev *pdev, int channel,
 		   not important */
 		iowrite32(0x80808080UL, board->conf_addr + S5920_PTCR);
 
-		/* Disable interrupts from card */
-		kvaser_pci_disable_irq(dev);
 		/* Enable interrupts from card */
 		kvaser_pci_enable_irq(dev);
 	} else {
@@ -267,13 +261,18 @@ static int kvaser_pci_add_chan(struct pci_dev *pdev, int channel,
 	priv->read_reg = kvaser_pci_read_reg;
 	priv->write_reg = kvaser_pci_write_reg;
 
-	priv->can.bittiming.clock = KVASER_PCI_CAN_CLOCK;
+	priv->can.clock.freq = KVASER_PCI_CAN_CLOCK;
 
 	priv->ocr = KVASER_PCI_OCR;
 	priv->cdr = KVASER_PCI_CDR;
 
-	/* Register and setup interrupt handling */
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,18)
+	priv->irq_flags = SA_SHIRQ;
+#else
+	priv->irq_flags = IRQF_SHARED;
+#endif
 	dev->irq = pdev->irq;
+
 	init_step = 4;
 
 	dev_info(&pdev->dev, "base_addr=%#lx conf_addr=%p irq=%d\n",
@@ -323,14 +322,14 @@ static int __devinit kvaser_pci_init_one(struct pci_dev *pdev,
 	if (err)
 		goto failure_release_pci;
 
-	/*S5920*/
+	/* S5920 */
 	conf_addr = pci_iomap(pdev, 0, PCI_CONFIG_PORT_SIZE);
 	if (conf_addr == NULL) {
 		err = -ENODEV;
-		goto failure_iounmap;
+		goto failure_release_regions;
 	}
 
-	/*XILINX board wide address*/
+	/* XILINX board wide address */
 	res_addr = pci_iomap(pdev, 2, PCI_PORT_XILINX_SIZE);
 	if (res_addr == NULL) {
 		err = -ENOMEM;
@@ -370,13 +369,14 @@ failure_cleanup:
 	kvaser_pci_del_chan(master_dev);
 
 failure_iounmap:
-	if (conf_addr == NULL)
+	if (conf_addr != NULL)
 		pci_iounmap(pdev, conf_addr);
-	if (res_addr == NULL)
+	if (res_addr != NULL)
 		pci_iounmap(pdev, res_addr);
-	if (base_addr == NULL)
+	if (base_addr != NULL)
 		pci_iounmap(pdev, base_addr);
 
+failure_release_regions:
 	pci_release_regions(pdev);
 
 failure_release_pci:

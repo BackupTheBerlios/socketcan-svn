@@ -1,4 +1,8 @@
 /*
+* FIXME: coding style issues!
+* FIXME: check softing_flush_echo_skb and bus_off handling.
+* FIXME: to be tested
+*
 * drivers/net/can/softing/softing_main.c
 *
 * Copyright (C) 2008
@@ -37,7 +41,7 @@
  */
 void softing_flush_echo_skb(struct softing_priv *priv)
 {
-	can_close_cleanup(priv->netdev);
+	close_candev(priv->netdev);
 	priv->tx.pending = 0;
 	priv->tx.echo_put = 0;
 	priv->tx.echo_get = 0;
@@ -171,7 +175,12 @@ static int softing_dev_svc_once(struct softing *card)
 				continue;
 			if (!netif_carrier_ok(bus->netdev))
 				continue;
-			++bus->can.can_stats.data_overrun;
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,23)
+			stats = can_get_stats(bus->netdev);
+#else
+			stats = &bus->netdev->stats;
+#endif
+			++stats->rx_over_errors;
 			skb = dev_alloc_skb(sizeof(msg));
 			if (!skb)
 				return -ENOMEM;
@@ -227,11 +236,11 @@ static int softing_dev_svc_once(struct softing *card)
 				msg.can_id |= CAN_ERR_BUSOFF;
 				state = 2;
 			} else if (state & 0x60) {
-				can_state = CAN_STATE_BUS_PASSIVE;
+				can_state = CAN_STATE_ERROR_PASSIVE;
 				msg.can_id |= CAN_ERR_BUSERROR;
 				state = 1;
 			} else {
-				can_state = CAN_STATE_ACTIVE;
+				can_state = CAN_STATE_ERROR_ACTIVE;
 				state = 0;
 				do_skb = 0;
 			}
@@ -266,7 +275,7 @@ static int softing_dev_svc_once(struct softing *card)
 				netif_stop_queue(bus->netdev);
 			}
 			if ((state == CAN_STATE_BUS_OFF)
-				 || (state == CAN_STATE_BUS_PASSIVE)) {
+				 || (state == CAN_STATE_ERROR_PASSIVE)) {
 				skb = dev_alloc_skb(sizeof(msg));
 				if (!skb)
 					return -ENOMEM;
@@ -429,22 +438,30 @@ static int netdev_open(struct net_device *ndev)
 	int ret;
 
 	mod_trace("%s", ndev->name);
-	/* determine and set bittime */
-	ret = can_set_bittiming(ndev);
+	/* check or determine and set bittime */
+	ret = open_candev(ndev);
 	if (ret)
 		return ret;
-	if (mutex_lock_interruptible(&card->fw.lock))
-		return -ERESTARTSYS;
+	if (mutex_lock_interruptible(&card->fw.lock)) {
+		ret = -ERESTARTSYS;
+		goto out_close;
+	}
 	fw = card->fw.up;
 	if (fw)
 		softing_reinit(card
 			, (card->bus[0] == priv) ? 1 : -1
 			, (card->bus[1] == priv) ? 1 : -1);
 	mutex_unlock(&card->fw.lock);
-	if (!fw)
-		return -EIO;
+	if (!fw) {
+		ret = -EIO;
+		goto out_close;
+	}
 	netif_start_queue(ndev);
 	return 0;
+
+out_close:
+	close_candev(ndev);
+	return ret;
 }
 
 static int netdev_stop(struct net_device *ndev)
@@ -457,7 +474,7 @@ static int netdev_stop(struct net_device *ndev)
 	netif_stop_queue(ndev);
 	netif_carrier_off(ndev);
 	softing_flush_echo_skb(priv);
-	can_close_cleanup(ndev);
+	close_candev(ndev);
 	if (mutex_lock_interruptible(&card->fw.lock))
 		return -ERESTARTSYS;
 	fw = card->fw.up;
@@ -471,7 +488,8 @@ static int netdev_stop(struct net_device *ndev)
 	return 0;
 }
 
-static int candev_get_state(struct net_device *ndev, enum can_state *state)
+static int candev_get_state(const struct net_device *ndev,
+			    enum can_state *state)
 {
 	struct softing_priv *priv = netdev_priv(ndev);
 	mod_trace("%s", ndev->name);
@@ -480,7 +498,7 @@ static int candev_get_state(struct net_device *ndev, enum can_state *state)
 	else if (priv->can.state == CAN_STATE_STOPPED)
 		*state = CAN_STATE_STOPPED;
 	else
-		*state = CAN_STATE_ACTIVE;
+		*state = CAN_STATE_ERROR_ACTIVE;
 	return 0;
 }
 
@@ -876,8 +894,8 @@ static struct softing_priv *mk_netdev(struct softing *card, u16 chip_id)
 	priv->btr_const.brp_max = card->desc->max_brp;
 	priv->btr_const.sjw_max = card->desc->max_sjw;
 	priv->can.bittiming_const = &priv->btr_const;
-	priv->can.bittiming.clock = 8000000;
-	priv->chip		= chip_id;
+	priv->can.clock.freq	= 8000000;
+	priv->chip 		= chip_id;
 	priv->output = softing_default_output(card, priv);
 	SET_NETDEV_DEV(ndev, card->dev);
 

@@ -1,4 +1,9 @@
 /*
+ * FIXME: echo support missing (requilred for IFF_ECHO)
+ * FIXME: increment can_stats in case of state changes
+ * FIXME: state changes by interrupt
+ * FIXME: do_set_mode not implemented (required for restart)
+ * FIXME: to be tested
  *
  * CAN bus driver for Microchip 251x CAN Controller with SPI Interface
  *
@@ -649,7 +654,7 @@ static void mcp251x_setup(struct net_device *net, struct mcp251x_priv *priv,
 
 	/* Set initial baudrate. Make sure that registers are updated
 	   always by explicitly calling mcp251x_do_set_bittiming */
-	ret = can_set_bittiming(net);
+	ret = open_candev(net);
 	if (ret)
 		dev_err(&spi->dev, "unable to set initial baudrate!\n");
 	else
@@ -754,10 +759,13 @@ static int mcp251x_stop(struct net_device *net)
 	if (pdata->transceiver_enable)
 		pdata->transceiver_enable(0);
 
+	close_candev(net);
+
 	return 0;
 }
 
-static int mcp251x_do_get_state(struct net_device *net, enum can_state	*state)
+static int mcp251x_do_get_state(const struct net_device *net,
+				enum can_state	*state)
 {
 	struct mcp251x_priv *priv = netdev_priv(net);
 	struct spi_device *spi = priv->spi;
@@ -768,11 +776,11 @@ static int mcp251x_do_get_state(struct net_device *net, enum can_state	*state)
 	if (eflag & EFLG_TXBO)
 		*state = CAN_STATE_BUS_OFF;
 	else if (eflag & (EFLG_RXEP | EFLG_TXEP))
-		*state = CAN_STATE_BUS_PASSIVE;
+		*state = CAN_STATE_ERROR_PASSIVE;
 	else if (eflag & EFLG_EWARN)
-		*state = CAN_STATE_BUS_WARNING;
+		*state = CAN_STATE_ERROR_WARNING;
 	else
-		*state = CAN_STATE_ACTIVE;
+		*state = CAN_STATE_ERROR_ACTIVE;
 
 	return 0;
 }
@@ -1032,7 +1040,7 @@ static int __devinit mcp251x_can_probe(struct spi_device *spi)
 	priv->spi = spi;
 	mutex_init(&priv->spi_lock);
 
-	priv->can.bittiming.clock = pdata->oscillator_frequency / 2;
+	priv->can.clock.freq = pdata->oscillator_frequency / 2;
 
 	/* If requested, allocate DMA buffers */
 	if (mcp251x_enable_dma) {

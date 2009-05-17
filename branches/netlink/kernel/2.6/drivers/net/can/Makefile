@@ -33,7 +33,8 @@ obj-$(CONFIG_CAN_VCAN)		+= vcan.o
 obj-$(CONFIG_CAN_SLCAN)		+= slcan.o
 
 obj-$(CONFIG_CAN_DEV)		+= can-dev.o
-can-dev-y			:= dev.o sysfs.o
+can-dev-y			:= dev.o
+can-dev-$(CONFIG_CAN_DEV_SYSFS) += sysfs.o
 
 obj-$(CONFIG_CAN_SJA1000)	+= sja1000/
 obj-$(CONFIG_CAN_SOFTING)	+= softing/
@@ -46,5 +47,6 @@ obj-$(CONFIG_CAN_CCAN_OLD)	+= old/ccan/
 obj-$(CONFIG_CAN_MCP251X)	+= mcp251x.o
 
 ccflags-$(CONFIG_CAN_DEBUG_DEVICES) := -DDEBUG
+ccflags-$(CONFIG_CAN_DEV_SYSFS) := -DCONFIG_CAN_DEV_SYSFS
 
 endif

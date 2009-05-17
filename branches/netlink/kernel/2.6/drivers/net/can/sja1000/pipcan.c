@@ -44,12 +44,12 @@ MODULE_LICENSE("GPL v2");
 #define PIPCAN_RES        (0x804)
 #define PIPCAN_RST        (0x805)
 
-static u8 pc_read_reg(struct net_device *dev, int reg)
+static u8 pc_read_reg(const struct net_device *dev, int reg)
 {
 	return inb(dev->base_addr + reg);
 }
 
-static void pc_write_reg(struct net_device *dev, int reg, u8 val)
+static void pc_write_reg(const struct net_device *dev, int reg, u8 val)
 {
 	outb(val, dev->base_addr + reg);
 }
@@ -80,9 +80,14 @@ static int __init pc_probe(struct platform_device *pdev)
 
 	priv->read_reg = pc_read_reg;
 	priv->write_reg = pc_write_reg;
-	priv->can.bittiming.clock = PIPCAN_CAN_CLOCK;
+	priv->can.clock.freq = PIPCAN_CAN_CLOCK;
 	priv->ocr = PIPCAN_OCR;
 	priv->cdr = PIPCAN_CDR;
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,18)
+	priv->irq_flags = SA_SHIRQ;
+#else
+	priv->irq_flags = IRQF_SHARED;
+#endif
 
 	dev->irq = irq;
 	dev->base_addr = res->start;

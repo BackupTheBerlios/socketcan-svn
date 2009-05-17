@@ -38,13 +38,23 @@ source "drivers/net/can/old/Kconfig"
 endif
 
 config CAN_DEV
-	tristate "Prompt for platform CAN drivers with sysfs support"
+	tristate "Prompt for platform CAN drivers with netlink support"
 	depends on CAN && SYSFS
 	default Y
 	---help---
 	  Enables the common framework for platform CAN drivers with sysfs
 	  support. This is the standard library for CAN drivers.
 	  If unsure, say Y.
+
+config CAN_DEV_SYSFS
+	bool "Support for sysfs interface (deprecated)"
+	depends on CAN_DEV && SYSFS
+	default N
+	---help---
+	  Adds support for the legacy sysfs interface to configure CAN
+	  devices. If possible, please use the new netlink interface
+	  instead.
+	  If unsure, say N.
 
 config CAN_CALC_BITTIMING
 	bool "CAN bit-timing calculation"
@@ -64,14 +74,7 @@ config CAN_SJA1000
 	depends on CAN_DEV
 	tristate "Philips SJA1000"
 	---help---
-	  The SJA1000 is one of the top CAN controllers out there. As it
-	  has a multiplexed interface it fits directly to 8051
-	  microcontrollers or into the PC I/O port space. The SJA1000
-	  is a full CAN controller, with shadow registers for RX and TX.
-	  It can send and receive any kinds of CAN frames (SFF/EFF/RTR)
-	  with a single (simple) filter setup.
-
-	  This driver will use the new device interface.
+	  Driver for the SJA1000 CAN controllers from Philips or NXP
 
 config CAN_SJA1000_PLATFORM
 	depends on CAN_SJA1000

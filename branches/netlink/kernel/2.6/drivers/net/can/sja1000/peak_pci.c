@@ -81,7 +81,7 @@ static struct pci_device_id peak_pci_tbl[] = {
 
 MODULE_DEVICE_TABLE(pci, peak_pci_tbl);
 
-static u8 peak_pci_read_reg(struct net_device *dev, int port)
+static u8 peak_pci_read_reg(const struct net_device *dev, int port)
 {
 	u8 val;
 	val = readb((const volatile void __iomem *)
@@ -89,13 +89,13 @@ static u8 peak_pci_read_reg(struct net_device *dev, int port)
 	return val;
 }
 
-static void peak_pci_write_reg(struct net_device *dev, int port, u8 val)
+static void peak_pci_write_reg(const struct net_device *dev, int port, u8 val)
 {
 	writeb(val, (volatile void __iomem *)
 	       (dev->base_addr + (port << 2)));
 }
 
-static void peak_pci_post_irq(struct net_device *dev)
+static void peak_pci_post_irq(const struct net_device *dev)
 {
 	struct sja1000_priv *priv = netdev_priv(dev);
 	struct peak_pci *board = priv->priv;
@@ -217,7 +217,7 @@ static int peak_pci_add_chan(struct pci_dev *pdev, int channel,
 	priv->write_reg = peak_pci_write_reg;
 	priv->post_irq = peak_pci_post_irq;
 
-	priv->can.bittiming.clock = PEAK_PCI_CAN_CLOCK;
+	priv->can.clock.freq = PEAK_PCI_CAN_CLOCK;
 
 	priv->ocr = PEAK_PCI_OCR;
 
@@ -226,7 +226,12 @@ static int peak_pci_add_chan(struct pci_dev *pdev, int channel,
 	else
 		priv->cdr = PEAK_PCI_CDR_SINGLE;
 
-	/* Register and setup interrupt handling */
+	/* Setup interrupt handling */
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,18)
+	priv->irq_flags = SA_SHIRQ;
+#else
+	priv->irq_flags = IRQF_SHARED;
+#endif
 	dev->irq = pdev->irq;
 	icr_high = readw(board->conf_addr + PITA_ICR + 2);
 	if (channel == PEAK_PCI_SLAVE)

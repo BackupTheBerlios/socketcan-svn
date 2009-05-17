@@ -94,12 +94,12 @@ MODULE_DEVICE_TABLE (pcmcia, ems_pcmcia_tbl);
 
 static void ems_pcmcia_config(struct pcmcia_device *dev);
 
-static u8 ems_pcmcia_read_reg(struct net_device *dev, int port)
+static u8 ems_pcmcia_read_reg(const struct net_device *dev, int port)
 {
 	return readb((void __iomem *)dev->base_addr + port);
 }
 
-static void ems_pcmcia_write_reg(struct net_device *dev, int port, u8 val)
+static void ems_pcmcia_write_reg(const struct net_device *dev, int port, u8 val)
 {
 	writeb(val, (void __iomem *)dev->base_addr + port);
 }
@@ -259,6 +259,11 @@ static int __devinit ems_pcmcia_add_card(struct pcmcia_device *pdev,
 		priv->priv = card;
 		SET_NETDEV_DEV(dev, &pdev->dev);
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,18)
+		priv->irq_flags = SA_SHIRQ;
+#else
+		priv->irq_flags = IRQF_SHARED;
+#endif
 		dev->irq = pdev->irq.AssignedIRQ;
 		dev->base_addr = (unsigned long)(card->base_addr
 					+ EMS_PCMCIA_CAN_BASE_OFFSET
@@ -268,7 +273,7 @@ static int __devinit ems_pcmcia_add_card(struct pcmcia_device *pdev,
 		if (ems_pcmcia_check_chan(dev)) {
 			priv->read_reg  = ems_pcmcia_read_reg;
 			priv->write_reg = ems_pcmcia_write_reg;
-			priv->can.bittiming.clock = EMS_PCMCIA_CAN_CLOCK;
+			priv->can.clock.freq = EMS_PCMCIA_CAN_CLOCK;
 			priv->ocr = EMS_PCMCIA_OCR;
 			priv->cdr = EMS_PCMCIA_CDR;
 			priv->flags |= SJA1000_CUSTOM_IRQ_HANDLER;

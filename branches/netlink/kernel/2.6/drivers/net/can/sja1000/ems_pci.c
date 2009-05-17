@@ -107,19 +107,19 @@ static u8 ems_pci_readb(struct ems_pci_card *card, unsigned int port)
 			+ (port * EMS_PCI_PORT_BYTES));
 }
 
-static u8 ems_pci_read_reg(struct net_device *dev, int port)
+static u8 ems_pci_read_reg(const struct net_device *dev, int port)
 {
 	return readb((void __iomem *)dev->base_addr
 			+ (port * EMS_PCI_PORT_BYTES));
 }
 
-static void ems_pci_write_reg(struct net_device *dev, int port, u8 val)
+static void ems_pci_write_reg(const struct net_device *dev, int port, u8 val)
 {
 	writeb(val, (void __iomem *)dev->base_addr
 		+ (port * EMS_PCI_PORT_BYTES));
 }
 
-static void ems_pci_post_irq(struct net_device *dev)
+static void ems_pci_post_irq(const struct net_device *dev)
 {
 	struct sja1000_priv *priv = netdev_priv(dev);
 	struct ems_pci_card *card = (struct ems_pci_card *)priv->priv;
@@ -261,6 +261,11 @@ static int __devinit ems_pci_add_card(struct pci_dev *pdev,
 		card->net_dev[i] = dev;
 		priv = netdev_priv(dev);
 		priv->priv = card;
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,18)
+		priv->irq_flags = SA_SHIRQ;
+#else
+		priv->irq_flags = IRQF_SHARED;
+#endif
 
 		dev->irq = pdev->irq;
 		dev->base_addr = (unsigned long)(card->base_addr
@@ -272,7 +277,7 @@ static int __devinit ems_pci_add_card(struct pci_dev *pdev,
 			priv->read_reg  = ems_pci_read_reg;
 			priv->write_reg = ems_pci_write_reg;
 			priv->post_irq  = ems_pci_post_irq;
-			priv->can.bittiming.clock = EMS_PCI_CAN_CLOCK;
+			priv->can.clock.freq = EMS_PCI_CAN_CLOCK;
 			priv->ocr = EMS_PCI_OCR;
 			priv->cdr = EMS_PCI_CDR;
 

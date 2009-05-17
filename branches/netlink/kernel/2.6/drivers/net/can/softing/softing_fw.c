@@ -632,11 +632,11 @@ int softing_reinit(struct softing *card, int bus0, int bus1)
 	/*TODO: generate RESTARTED messages */
 
 	if (card->bus[0] && bus0) {
-		card->bus[0]->can.state = CAN_STATE_ACTIVE;
+		card->bus[0]->can.state = CAN_STATE_ERROR_ACTIVE;
 		netif_carrier_on(card->bus[0]->netdev);
 	}
 	if (card->bus[1] && bus1) {
-		card->bus[1]->can.state = CAN_STATE_ACTIVE;
+		card->bus[1]->can.state = CAN_STATE_ERROR_ACTIVE;
 		netif_carrier_on(card->bus[1]->netdev);
 	}
 	return 0;

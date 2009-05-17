@@ -80,14 +80,14 @@ static struct pci_device_id ixxat_pci_tbl[] = {
 
 MODULE_DEVICE_TABLE(pci, ixxat_pci_tbl);
 
-static u8 ixxat_pci_read_reg(struct net_device *ndev, int port)
+static u8 ixxat_pci_read_reg(const struct net_device *ndev, int port)
 {
 	u8 val;
 	val = readb((void __iomem *)(ndev->base_addr + port));
 	return val;
 }
 
-static void ixxat_pci_write_reg(struct net_device *ndev, int port, u8 val)
+static void ixxat_pci_write_reg(const struct net_device *ndev, int port, u8 val)
 {
 	writeb(val, (void __iomem *)(ndev->base_addr + port));
 }
@@ -119,12 +119,16 @@ static struct net_device *ixxat_pci_add_chan(struct pci_dev *pdev,
 	priv->read_reg = ixxat_pci_read_reg;
 	priv->write_reg = ixxat_pci_write_reg;
 
-	priv->can.bittiming.clock = IXXAT_PCI_CAN_CLOCK;
+	priv->can.clock.freq = IXXAT_PCI_CAN_CLOCK;
 
 	priv->ocr = IXXAT_PCI_OCR;
 	priv->cdr = IXXAT_PCI_CDR;
 
-	/* Set and enable PCI interrupts */
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,18)
+	priv->irq_flags = SA_SHIRQ;
+#else
+	priv->irq_flags = IRQF_SHARED;
+#endif
 	ndev->irq = pdev->irq;
 
 	dev_dbg(&pdev->dev, "base_addr=%#lx irq=%d\n",

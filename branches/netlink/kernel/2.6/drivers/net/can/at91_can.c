@@ -1,4 +1,10 @@
 /*
+ * FIXME: remove at91_get_state() as already done by upper layer
+ * FIXME: bus-off handling
+ * FIXME: review non-standard error counting and statistics
+ * FIXME: remove tx timeout callback
+ * FIXME: to be tested
+ *
  * at91_can.c -  CAN network driver for AT91 SoC CAN controller
  *
  * (C) 2007 by Hans J. Koch <hjk@linutronix.de>
@@ -933,8 +939,8 @@ static int at91_open(struct net_device *dev)
 
 	clk_enable(priv->clk);
 
-	/* determine and set bittime */
-	err = can_set_bittiming(dev);
+	/* check or determine and set bittime */
+	err = open_candev(dev);
 	if (err)
 		goto out;
 
@@ -942,7 +948,7 @@ static int at91_open(struct net_device *dev)
 	if (request_irq(dev->irq, at91_irq, IRQF_SHARED,
 			dev->name, dev)) {
 		err = -EAGAIN;
-		goto out;
+		goto out_close;
 	}
 
 	/* start chip and queuing */
@@ -951,6 +957,8 @@ static int at91_open(struct net_device *dev)
 
 	return 0;
 
+ out_close:
+	close_candev(dev);
  out:
 	clk_disable(priv->clk);
 
@@ -971,13 +979,13 @@ static int at91_close(struct net_device *dev)
 	free_irq(dev->irq, dev);
 	clk_disable(priv->clk);
 
-	can_close_cleanup(dev);
+	close_candev(dev);
 
 	return 0;
 }
 
 
-static int at91_get_state(struct net_device *dev, u32 *state)
+static int at91_get_state(const struct net_device *dev, u32 *state)
 {
 	struct at91_priv *priv = netdev_priv(dev);
 	*state = priv->can.state;
@@ -1069,7 +1077,7 @@ static int __init at91_can_probe(struct platform_device *pdev)
 	dev->flags		|= IFF_ECHO;
 
 	priv = netdev_priv(dev);
-	priv->can.bittiming.clock	= clk_get_rate(clk);
+	priv->can.clock.freq		= clk_get_rate(clk);
 	priv->can.bittiming_const	= &at91_bittiming_const;
 	priv->can.do_set_bittiming	= at91_set_bittiming;
 	priv->can.do_get_state		= at91_get_state;
