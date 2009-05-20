@@ -112,12 +112,12 @@ static struct pci_device_id esd_pci_tbl[] = {
 
 MODULE_DEVICE_TABLE(pci, esd_pci_tbl);
 
-static u8 esd_pci_read_reg(struct net_device *ndev, int port)
+static u8 esd_pci_read_reg(const struct net_device *ndev, int port)
 {
 	return readb((void __iomem *)(ndev->base_addr + port));
 }
 
-static void esd_pci_write_reg(struct net_device *ndev, int port, u8 val)
+static void esd_pci_write_reg(const struct net_device *ndev, int port, u8 val)
 {
 	writeb(val, (void __iomem *)(ndev->base_addr + port));
 }
@@ -149,12 +149,17 @@ static struct net_device * __devinit esd_pci_add_chan(struct pci_dev *pdev,
 	priv->read_reg = esd_pci_read_reg;
 	priv->write_reg = esd_pci_write_reg;
 
-	priv->can.bittiming.clock = ESD_PCI_CAN_CLOCK;
+	priv->can.clock.freq = ESD_PCI_CAN_CLOCK;
 
 	priv->ocr = ESD_PCI_OCR;
 	priv->cdr = ESD_PCI_CDR;
 
 	/* Set and enable PCI interrupts */
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,18)
+	priv->irq_flags = SA_SHIRQ;
+#else
+	priv->irq_flags = IRQF_SHARED;
+#endif
 	ndev->irq = pdev->irq;
 
 	dev_dbg(&pdev->dev, "base_addr=%#lx irq=%d\n",
