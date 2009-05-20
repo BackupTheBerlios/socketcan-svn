@@ -680,9 +680,6 @@ int register_sja1000dev(struct net_device *dev)
 #endif
 
 	dev->flags |= IFF_ECHO;	/* we support local echo */
-#if LINUX_VERSION_CODE > KERNEL_VERSION(2,6,28)
-	dev->netdev_ops = &sja1000_netdev_ops;
-#endif
 
 	set_reset_mode(dev);
 	chipset_init(dev);
