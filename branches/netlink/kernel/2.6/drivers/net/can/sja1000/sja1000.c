@@ -122,7 +122,11 @@ static void set_reset_mode(struct net_device *dev)
 		status = priv->read_reg(dev, REG_MOD);
 	}
 
-	dev_err(ND2D(dev), "setting SJA1000 into reset mode failed!\n");
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,21)
+	dev_err(dev->class_dev.dev, "setting SJA1000 into reset mode failed!\n");
+#else
+	dev_err(dev->dev.parent, "setting SJA1000 into reset mode failed!\n");
+#endif
 }
 
 static void set_normal_mode(struct net_device *dev)
@@ -146,7 +150,11 @@ static void set_normal_mode(struct net_device *dev)
 		status = priv->read_reg(dev, REG_MOD);
 	}
 
-	dev_err(ND2D(dev), "setting SJA1000 into normal mode failed!\n");
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,21)
+	dev_err(dev->class_dev.dev, "setting SJA1000 into normal mode failed!\n");
+#else
+	dev_err(dev->dev.parent, "setting SJA1000 into normal mode failed!\n");
+#endif
 }
 
 static void sja1000_start(struct net_device *dev)
@@ -199,8 +207,13 @@ static int sja1000_set_bittiming(struct net_device *dev)
 	if (priv->can.ctrlmode & CAN_CTRLMODE_3_SAMPLES)
 		btr1 |= 0x80;
 
-	dev_info(ND2D(dev),
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,21)
+	dev_info(dev->class_dev.dev,
 		 "setting BTR0=0x%02x BTR1=0x%02x\n", btr0, btr1);
+#else
+	dev_info(dev->dev.parent,
+		 "setting BTR0=0x%02x BTR1=0x%02x\n", btr0, btr1);
+#endif
 
 	priv->write_reg(dev, REG_BTR0, btr0);
 	priv->write_reg(dev, REG_BTR1, btr1);
@@ -382,7 +395,11 @@ static int sja1000_err(struct net_device *dev, uint8_t isrc, uint8_t status)
 
 	if (isrc & IRQ_DOI) {
 		/* data overrun interrupt */
-		dev_dbg(ND2D(dev), "data overrun interrupt\n");
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,21)
+		dev_dbg(dev->class_dev.dev, "data overrun interrupt\n");
+#else
+		dev_dbg(dev->dev.parent, "data overrun interrupt\n");
+#endif
 		cf->can_id |= CAN_ERR_CRTL;
 		cf->data[1] = CAN_ERR_CRTL_RX_OVERFLOW;
 		stats->rx_over_errors++;
@@ -392,7 +409,11 @@ static int sja1000_err(struct net_device *dev, uint8_t isrc, uint8_t status)
 
 	if (isrc & IRQ_EI) {
 		/* error warning interrupt */
-		dev_dbg(ND2D(dev), "error warning interrupt\n");
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,21)
+		dev_dbg(dev->class_dev.dev, "error warning interrupt\n");
+#else
+		dev_dbg(dev->dev.parent, "error warning interrupt\n");
+#endif
 
 		if (status & SR_BS) {
 			state = CAN_STATE_BUS_OFF;
@@ -433,7 +454,11 @@ static int sja1000_err(struct net_device *dev, uint8_t isrc, uint8_t status)
 	}
 	if (isrc & IRQ_EPI) {
 		/* error passive interrupt */
-		dev_dbg(ND2D(dev), "error passive interrupt\n");
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,21)
+		dev_dbg(dev->class_dev.dev, "error passive interrupt\n");
+#else
+		dev_dbg(dev->dev.parent, "error passive interrupt\n");
+#endif
 		if (status & SR_ES)
 			state = CAN_STATE_ERROR_PASSIVE;
 		else
@@ -441,7 +466,11 @@ static int sja1000_err(struct net_device *dev, uint8_t isrc, uint8_t status)
 	}
 	if (isrc & IRQ_ALI) {
 		/* arbitration lost interrupt */
-		dev_dbg(ND2D(dev), "arbitration lost interrupt\n");
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,21)
+		dev_dbg(dev->class_dev.dev, "arbitration lost interrupt\n");
+#else
+		dev_dbg(dev->dev.parent, "arbitration lost interrupt\n");
+#endif
 		alc = priv->read_reg(dev, REG_ALC);
 		priv->can.can_stats.arbitration_lost++;
 		stats->rx_errors++;
@@ -506,7 +535,11 @@ irqreturn_t sja1000_interrupt(int irq, void *dev_id)
 		status = priv->read_reg(dev, REG_SR);
 
 		if (isrc & IRQ_WUI)
-			dev_warn(ND2D(dev), "wakeup interrupt\n");
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,21)
+			dev_warn(dev->class_dev.dev, "wakeup interrupt\n");
+#else
+			dev_warn(dev->dev.parent, "wakeup interrupt\n");
+#endif
 
 		if (isrc & IRQ_TI) {
 			/* transmission complete interrupt */
@@ -532,7 +565,11 @@ irqreturn_t sja1000_interrupt(int irq, void *dev_id)
 		priv->post_irq(dev);
 
 	if (n >= SJA1000_MAX_IRQ)
-		dev_dbg(ND2D(dev), "%d messages handled in ISR", n);
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,21)
+		dev_dbg(dev->class_dev.dev, "%d messages handled in ISR", n);
+#else
+		dev_dbg(dev->dev.parent, "%d messages handled in ISR", n);
+#endif
 
 	return (n) ? IRQ_HANDLED : IRQ_NONE;
 }

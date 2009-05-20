@@ -20,6 +20,7 @@
  */
 
 #include <linux/module.h>
+#include <linux/version.h>
 #include <linux/kernel.h>
 #include <linux/netdevice.h>
 #include <linux/if_arp.h>
@@ -135,13 +136,24 @@ static int can_calc_bittiming(struct net_device *dev, struct can_bittiming *bt)
 		/* Error in one-tenth of a percent */
 		error = (best_error * 1000) / bt->bitrate;
 		if (error > CAN_CALC_MAX_ERROR) {
-			dev_err(ND2D(dev),
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,21)
+			dev_err(dev->class_dev.dev,
 				"bitrate error %ld.%ld%% too high\n",
 				error / 10, error % 10);
+#else
+			dev_err(dev->dev.parent,
+				"bitrate error %ld.%ld%% too high\n",
+				error / 10, error % 10);
+#endif
 			return -EDOM;
 		} else {
-			dev_warn(ND2D(dev), "bitrate error %ld.%ld%%\n",
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,21)
+			dev_warn(dev->class_dev.dev, "bitrate error %ld.%ld%%\n",
 				 error / 10, error % 10);
+#else
+			dev_warn(dev->dev.parent, "bitrate error %ld.%ld%%\n",
+				 error / 10, error % 10);
+#endif
 		}
 	}
 
@@ -166,7 +178,11 @@ static int can_calc_bittiming(struct net_device *dev, struct can_bittiming *bt)
 #else /* !CONFIG_CAN_CALC_BITTIMING */
 static int can_calc_bittiming(struct net_device *dev, struct can_bittiming *bt)
 {
-	dev_err(ND2D(dev), "bit-timing calculation not available\n");
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,21)
+	dev_err(dev->class_dev.dev, "bit-timing calculation not available\n");
+#else
+	dev_err(dev->dev.parent, "bit-timing calculation not available\n");
+#endif
 	return -EINVAL;
 }
 #endif /* CONFIG_CAN_CALC_BITTIMING */
@@ -317,8 +333,13 @@ void can_put_echo_skb(struct sk_buff *skb, struct net_device *dev, int idx)
 		priv->echo_skb[idx] = skb;
 	} else {
 		/* locking problem with netif_stop_queue() ?? */
-		dev_err(ND2D(dev), "%s: BUG! echo_skb is occupied!\n",
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,21)
+		dev_err(dev->class_dev.dev, "%s: BUG! echo_skb is occupied!\n",
 			__func__);
+#else
+		dev_err(dev->dev.parent, "%s: BUG! echo_skb is occupied!\n",
+			__func__);
+#endif
 		kfree_skb(skb);
 	}
 }
@@ -385,7 +406,11 @@ void can_restart(unsigned long data)
 	stats->rx_packets++;
 	stats->rx_bytes += cf->can_dlc;
 
-	dev_dbg(ND2D(dev), "restarted\n");
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,21)
+	dev_dbg(dev->class_dev.dev, "restarted\n");
+#else
+	dev_dbg(dev->dev.parent, "restarted\n");
+#endif
 	priv->can_stats.restarts++;
 
 	/* Now restart the device */
@@ -394,7 +419,11 @@ void can_restart(unsigned long data)
 out:
 	netif_carrier_on(dev);
 	if (err)
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,21)
+		dev_err(dev->class_dev.dev, "Error %d during restart", err);
+#else
 		dev_err(dev->dev.parent, "Error %d during restart", err);
+#endif
 }
 
 int can_restart_now(struct net_device *dev)
@@ -427,7 +456,11 @@ void can_bus_off(struct net_device *dev)
 {
 	struct can_priv *priv = netdev_priv(dev);
 
-	dev_dbg(ND2D(dev), "bus-off\n");
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,21)
+	dev_dbg(dev->class_dev.dev, "bus-off\n");
+#else
+	dev_dbg(dev->dev.parent, "bus-off\n");
+#endif
 
 	netif_carrier_off(dev);
 	priv->can_stats.bus_off++;
@@ -509,7 +542,11 @@ int open_candev(struct net_device *dev)
 #endif
 
 	if (!priv->bittiming.tq && !priv->bittiming.bitrate) {
-		dev_err(ND2D(dev), "bit-timing not yet defined\n");
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,21)
+		dev_err(dev->class_dev.dev, "bit-timing not yet defined\n");
+#else
+		dev_err(dev->dev.parent, "bit-timing not yet defined\n");
+#endif
 		return -EINVAL;
 	}
 

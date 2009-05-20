@@ -58,12 +58,6 @@ struct can_priv {
 			    enum can_state *state);
 };
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,21)
-#define ND2D(_ndev)	(_ndev->class_dev.dev)
-#else
-#define ND2D(_ndev)	(_ndev->dev.parent)
-#endif
-
 #if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,25)
 #define IFF_ECHO IFF_LOOPBACK
 #endif
