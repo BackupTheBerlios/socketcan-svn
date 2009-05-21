@@ -26,12 +26,13 @@
 #include <linux/if_arp.h>
 #include <linux/can.h>
 #include <linux/can/dev.h>
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,24)
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,24) || defined(CONFIG_CAN_DEV_SYSFS)
+#define USE_CAN_DEV_SYSFS
+#include "sysfs.h"
+#else
 #include <linux/can/netlink.h>
 #include <net/rtnetlink.h>
 #endif
-
-#include "sysfs.h"
 
 #define MOD_DESC "CAN device driver interface"
 
@@ -715,15 +716,18 @@ static struct rtnl_link_ops can_link_ops __read_mostly = {
  */
 int register_candev(struct net_device *dev)
 {
+#ifdef USE_CAN_DEV_SYSFS
 	int err;
-#ifndef USE_CAN_DEV_SYSFS
-	dev->rtnl_link_ops = &can_link_ops;
-#endif
+
 	err = register_netdev(dev);
 	if (!err)
 		can_create_sysfs(dev);
 
 	return err;
+#else
+	dev->rtnl_link_ops = &can_link_ops;
+	return register_netdev(dev);
+#endif
 }
 EXPORT_SYMBOL_GPL(register_candev);
 
@@ -732,7 +736,9 @@ EXPORT_SYMBOL_GPL(register_candev);
  */
 void unregister_candev(struct net_device *dev)
 {
+#ifdef USE_CAN_DEV_SYSFS
 	can_remove_sysfs(dev);
+#endif
 	unregister_netdev(dev);
 }
 EXPORT_SYMBOL_GPL(unregister_candev);

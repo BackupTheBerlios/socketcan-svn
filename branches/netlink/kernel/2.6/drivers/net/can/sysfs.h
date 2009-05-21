@@ -20,18 +20,8 @@
 #ifndef CAN_SYSFS_H
 #define CAN_SYSFS_H
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,24) || defined(CONFIG_CAN_DEV_SYSFS)
-#define USE_CAN_DEV_SYSFS
-#endif
-
-#ifdef USE_CAN_DEV_SYSFS
 void can_create_sysfs(struct net_device *dev);
 void can_remove_sysfs(struct net_device *dev);
 int can_sample_point(struct can_bittiming *bt);
-#else
-static inline void can_create_sysfs(struct net_device *dev) { }
-static inline void can_remove_sysfs(struct net_device *dev) { }
-#endif
-
 
 #endif /* CAN_SYSFS_H */
