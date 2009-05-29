@@ -81,6 +81,10 @@
 #include <linux/io.h>
 #include <linux/can/platform/mcp251x.h>
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,22)
+#error This driver does not support Kernel versions < 2.6.22
+#endif
+
 /* SPI interface instruction set */
 #define INSTRUCTION_WRITE		0x02
 #define INSTRUCTION_READ		0x03

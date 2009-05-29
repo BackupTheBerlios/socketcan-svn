@@ -529,6 +529,17 @@ void free_candev(struct net_device *dev)
 }
 EXPORT_SYMBOL_GPL(free_candev);
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,15)
+static inline void setup_timer(struct timer_list * timer,
+				void (*function)(unsigned long),
+				unsigned long data)
+{
+	timer->function = function;
+	timer->data = data;
+	init_timer(timer);
+}
+#endif
+
 /*
  * Common open function when the device gets opened.
  *

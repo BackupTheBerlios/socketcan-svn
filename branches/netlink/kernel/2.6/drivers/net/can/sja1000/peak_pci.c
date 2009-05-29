@@ -38,6 +38,10 @@
 
 #define DRV_NAME  "peak_pci"
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,23)
+#error This driver does not support Kernel versions < 2.6.23
+#endif
+
 MODULE_AUTHOR("Wolfgang Grandegger <wg@grandegger.com>");
 MODULE_DESCRIPTION("Socket-CAN driver for PEAK PCAN PCI cards");
 MODULE_SUPPORTED_DEVICE("PEAK PCAN PCI CAN card");

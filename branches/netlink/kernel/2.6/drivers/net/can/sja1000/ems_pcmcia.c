@@ -36,6 +36,10 @@
 
 #define DRV_NAME  "ems_pcmcia"
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,16)
+#error This driver does not support Kernel versions < 2.6.16
+#endif
+
 MODULE_AUTHOR("Sebastian Haas <haas@ems-wuenche.com>");
 MODULE_DESCRIPTION("Socket-CAN driver for EMS CPC-CARD cards");
 MODULE_SUPPORTED_DEVICE("EMS CPC-CARD CAN card");

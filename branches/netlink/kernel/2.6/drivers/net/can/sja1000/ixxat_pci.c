@@ -81,6 +81,16 @@ static struct pci_device_id ixxat_pci_tbl[] = {
 
 MODULE_DEVICE_TABLE(pci, ixxat_pci_tbl);
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,14)
+static inline void *kzalloc(size_t size, unsigned int __nocast flags)
+{
+	void *ret = kmalloc(size, flags);
+	if (ret)
+		memset(ret, 0, size);
+	return ret;
+}
+#endif
+
 static u8 ixxat_pci_read_reg(const struct net_device *ndev, int port)
 {
 	u8 val;

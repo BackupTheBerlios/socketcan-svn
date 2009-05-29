@@ -30,6 +30,10 @@
 
 #define DRV_NAME "pipcan"
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,20)
+#error This driver does not support Kernel versions < 2.6.20
+#endif
+
 MODULE_AUTHOR("David Müller <d.mueller@elsoft.ch>");
 MODULE_DESCRIPTION("Socket-CAN driver for MPL PIPCAN module");
 MODULE_SUPPORTED_DEVICE("MPL PIPCAN module");

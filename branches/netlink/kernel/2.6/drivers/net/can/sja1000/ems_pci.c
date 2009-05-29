@@ -36,6 +36,10 @@
 
 #define DRV_NAME  "ems_pci"
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,23)
+#error This driver does not support Kernel versions < 2.6.23
+#endif
+
 MODULE_AUTHOR("Sebastian Haas <haas@ems-wuenche.com>");
 MODULE_DESCRIPTION("Socket-CAN driver for EMS CPC-PCI/PCIe CAN cards");
 MODULE_SUPPORTED_DEVICE("EMS CPC-PCI/PCIe CAN card");

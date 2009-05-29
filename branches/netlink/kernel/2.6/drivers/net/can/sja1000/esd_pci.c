@@ -37,6 +37,10 @@
 
 #define DRV_NAME  "esd_pci"
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,21)
+#error This driver does not support Kernel versions < 2.6.21
+#endif
+
 MODULE_AUTHOR("Matthias Fuchs <matthias.fuchs@esd.eu");
 MODULE_DESCRIPTION("Socket-CAN driver for esd PCI/PMC/CPCI/PCIe/PCI104 " \
 		   "CAN cards");

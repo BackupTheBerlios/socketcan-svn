@@ -34,6 +34,10 @@
 
 #define DRV_NAME "sja1000_platform"
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,27)
+#error This driver does not support Kernel versions < 2.6.27
+#endif
+
 MODULE_AUTHOR("Sascha Hauer <s.hauer@pengutronix.de>");
 MODULE_DESCRIPTION("Socket-CAN driver for SJA1000 on the platform bus");
 MODULE_LICENSE("GPL v2");

@@ -34,6 +34,10 @@
 
 #include "softing.h"
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,23)
+#error This driver does not support Kernel versions < 2.6.23
+#endif
+
 /* this is the worst thing on the softing API
  * 2 busses are driven together, I don't know how
  * to recover a single of them.
