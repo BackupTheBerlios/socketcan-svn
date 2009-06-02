@@ -121,17 +121,10 @@ out:
 	return ret;
 }
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,21)
 #define CAN_CREATE_FILE(_dev, _name)					\
 	if (device_create_file(&_dev->dev, &dev_attr_##_name))		\
-		dev_err(dev->class_dev.dev,				\
+		dev_err(ND2D(_dev),					\
 			"Couldn't create device file for ##_name\n")
-#else
-#define CAN_CREATE_FILE(_dev, _name)					\
-	if (device_create_file(&_dev->dev, &dev_attr_##_name))		\
-		dev_err(dev->dev.parent,				\
-			"Couldn't create device file for ##_name\n")
-#endif
 
 #define CAN_REMOVE_FILE(_dev, _name)					\
 	device_remove_file(&_dev->dev, &dev_attr_##_name)		\
