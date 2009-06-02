@@ -396,7 +396,7 @@ void can_restart(unsigned long data)
 out:
 	netif_carrier_on(dev);
 	if (err)
-		dev_err(dev->dev.parent, "Error %d during restart", err);
+		dev_err(ND2D(dev), "Error %d during restart", err);
 }
 
 int can_restart_now(struct net_device *dev)
