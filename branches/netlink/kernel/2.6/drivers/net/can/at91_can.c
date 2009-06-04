@@ -33,9 +33,9 @@
 #include <linux/init.h>
 #include <linux/clk.h>
 
-#include <linux/can.h>
-#include <linux/can/error.h>
-#include <linux/can/dev.h>
+#include <socketcan/can.h>
+#include <socketcan/can/error.h>
+#include <socketcan/can/dev.h>
 
 #include <mach/board.h>
 

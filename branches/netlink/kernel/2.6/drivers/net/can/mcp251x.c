@@ -69,10 +69,10 @@
 #include <linux/interrupt.h>
 #include <linux/platform_device.h>
 #include <linux/netdevice.h>
-#include <linux/can.h>
+#include <socketcan/can.h>
 #include <linux/spi/spi.h>
-#include <linux/can/dev.h>
-#include <linux/can/core.h>
+#include <socketcan/can/dev.h>
+#include <socketcan/can/core.h>
 #include <linux/if_arp.h>
 #include <linux/dma-mapping.h>
 #include <linux/delay.h>
@@ -80,7 +80,7 @@
 #include <linux/freezer.h>
 #include <linux/uaccess.h>
 #include <linux/io.h>
-#include <linux/can/platform/mcp251x.h>
+#include <socketcan/can/platform/mcp251x.h>
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,22)
 #error This driver does not support Kernel versions < 2.6.22

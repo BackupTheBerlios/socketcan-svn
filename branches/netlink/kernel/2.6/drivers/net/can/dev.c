@@ -24,13 +24,13 @@
 #include <linux/kernel.h>
 #include <linux/netdevice.h>
 #include <linux/if_arp.h>
-#include <linux/can.h>
-#include <linux/can/dev.h>
+#include <socketcan/can.h>
+#include <socketcan/can/dev.h>
 #if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,24) || defined(CONFIG_CAN_DEV_SYSFS)
 #define USE_CAN_DEV_SYSFS
 #include "sysfs.h"
 #else
-#include <linux/can/netlink.h>
+#include <socketcan/can/netlink.h>
 #include <net/rtnetlink.h>
 #endif
 
@@ -54,7 +54,7 @@ MODULE_AUTHOR("Wolfgang Grandegger <wg@grandegger.com>");
  * Calculates proper bit-timing parameters for a specified bit-rate
  * and sample-point, which can then be used to set the bit-timing
  * registers of the CAN controller. You can find more information
- * in the header file linux/can/netlink.h.
+ * in the header file socketcan/can/netlink.h.
  */
 static int can_update_spt(const struct can_bittiming_const *btc,
 			  int sampl_pt, int tseg, int *tseg1, int *tseg2)
@@ -186,7 +186,7 @@ int can_sample_point(struct can_bittiming *bt)
  * Checks the validity of the specified bit-timing parameters prop_seg,
  * phase_seg1, phase_seg2 and sjw and tries to determine the bitrate
  * prescaler value brp. You can find more information in the header
- * file linux/can/netlink.h.
+ * file socketcan/can/netlink.h.
  */
 static int can_fixup_bittiming(struct net_device *dev, struct can_bittiming *bt)
 {

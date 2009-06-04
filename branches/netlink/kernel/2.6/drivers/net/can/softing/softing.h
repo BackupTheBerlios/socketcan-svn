@@ -6,8 +6,8 @@
 
 #include <linux/interrupt.h>
 #include <linux/netdevice.h>
-#include <linux/can.h>
-#include <linux/can/dev.h>
+#include <socketcan/can.h>
+#include <socketcan/can/dev.h>
 
 struct softing;
 struct sofing_desc;

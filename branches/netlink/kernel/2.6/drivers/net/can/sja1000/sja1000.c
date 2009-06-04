@@ -61,14 +61,14 @@
 #include <linux/skbuff.h>
 #include <linux/delay.h>
 
-#include <linux/can.h>
-#include <linux/can/dev.h>
-#include <linux/can/error.h>
-#include <linux/can/dev.h>
+#include <socketcan/can.h>
+#include <socketcan/can/dev.h>
+#include <socketcan/can/error.h>
+#include <socketcan/can/dev.h>
 
 #include "sja1000.h"
 
-#include <linux/can/version.h>	/* for RCSID. Removed by mkpatch script */
+#include <socketcan/can/version.h>	/* for RCSID. Removed by mkpatch script */
 RCSID("$Id: sja1000.c 531 2007-10-19 07:38:29Z hartkopp $");
 
 #define DRV_NAME "sja1000"

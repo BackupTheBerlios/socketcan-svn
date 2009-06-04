@@ -57,12 +57,12 @@
 #include <linux/if_ether.h>
 #include <linux/skbuff.h>
 
-#include <linux/can.h>
-#include <linux/can/ioctl.h> /* for struct can_device_stats */
+#include <socketcan/can.h>
+#include <socketcan/can/ioctl.h> /* for struct can_device_stats */
 #include "hal.h"
 #include "i82527.h"
 
-#include <linux/can/version.h> /* for RCSID. Removed by mkpatch script */
+#include <socketcan/can/version.h> /* for RCSID. Removed by mkpatch script */
 RCSID("$Id$");
 
 MODULE_AUTHOR("Oliver Hartkopp <oliver.hartkopp@volkswagen.de>");

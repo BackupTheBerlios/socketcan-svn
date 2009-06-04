@@ -25,8 +25,8 @@
 #include <net/sock.h>
 #include <linux/rtnetlink.h>
 
-#include <linux/can.h>
-#include <linux/can/dev.h>
+#include <socketcan/can.h>
+#include <socketcan/can/dev.h>
 
 #include "sysfs.h"
 

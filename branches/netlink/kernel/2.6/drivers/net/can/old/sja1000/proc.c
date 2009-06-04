@@ -47,12 +47,12 @@
 #include <linux/proc_fs.h>
 #include <linux/netdevice.h>
 
-#include <linux/can.h>
-#include <linux/can/ioctl.h>
+#include <socketcan/can.h>
+#include <socketcan/can/ioctl.h>
 #include "sja1000.h"
 #include "hal.h"
 
-#include <linux/can/version.h> /* for RCSID. Removed by mkpatch script */
+#include <socketcan/can/version.h> /* for RCSID. Removed by mkpatch script */
 RCSID("$Id$");
 
 extern struct net_device *can_dev[];

@@ -47,8 +47,8 @@
 #ifndef SJA1000_DEV_H
 #define SJA1000_DEV_H
 
-#include <linux/can/dev.h>
-#include <linux/can/platform/sja1000.h>
+#include <socketcan/can/dev.h>
+#include <socketcan/can/platform/sja1000.h>
 
 #define SJA1000_MAX_IRQ 20	/* max. number of interrupts handled in ISR */
 

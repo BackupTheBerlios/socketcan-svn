@@ -61,8 +61,8 @@
 #include <linux/if_ether.h>
 #include <linux/if_arp.h>
 #include <linux/skbuff.h>
-#include <linux/can.h>
-#include <linux/can/core.h>
+#include <socketcan/can.h>
+#include <socketcan/can/core.h>
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,24)
 #include <net/net_namespace.h>
 #endif
@@ -73,7 +73,7 @@
 #include "compat.h"
 #endif
 
-#include <linux/can/version.h> /* for RCSID. Removed by mkpatch script */
+#include <socketcan/can/version.h> /* for RCSID. Removed by mkpatch script */
 RCSID("$Id$");
 
 static __initdata const char banner[] = KERN_INFO

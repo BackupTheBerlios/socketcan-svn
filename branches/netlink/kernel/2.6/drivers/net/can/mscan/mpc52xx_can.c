@@ -24,8 +24,8 @@
 #include <linux/interrupt.h>
 #include <linux/platform_device.h>
 #include <linux/netdevice.h>
-#include <linux/can.h>
-#include <linux/can/dev.h>
+#include <socketcan/can.h>
+#include <socketcan/can/dev.h>
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,27)
 #include <linux/of_platform.h>
 #include <sysdev/fsl_soc.h>
@@ -39,7 +39,7 @@
 
 #include "mscan.h"
 
-#include <linux/can/version.h>	/* for RCSID. Removed by mkpatch script */
+#include <socketcan/can/version.h>	/* for RCSID. Removed by mkpatch script */
 
 RCSID("$Id$");
 

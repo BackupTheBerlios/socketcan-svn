@@ -73,9 +73,9 @@
 #include <linux/delay.h>
 #include <linux/init.h>
 
-#include <linux/can.h>
+#include <socketcan/can.h>
 
-#include <linux/can/version.h> /* for RCSID. Removed by mkpatch script */
+#include <socketcan/can/version.h> /* for RCSID. Removed by mkpatch script */
 RCSID("$Id$");
 
 static __initdata const char banner[] =

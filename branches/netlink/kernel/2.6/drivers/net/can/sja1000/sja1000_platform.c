@@ -25,9 +25,9 @@
 #include <linux/pci.h>
 #include <linux/platform_device.h>
 #include <linux/irq.h>
-#include <linux/can.h>
-#include <linux/can/dev.h>
-#include <linux/can/platform/sja1000.h>
+#include <socketcan/can.h>
+#include <socketcan/can/dev.h>
+#include <socketcan/can/platform/sja1000.h>
 #include <linux/io.h>
 
 #include "sja1000.h"
