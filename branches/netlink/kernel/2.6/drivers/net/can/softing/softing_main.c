@@ -882,6 +882,14 @@ static void rm_netdev_sysfs(struct softing_priv *priv)
 	sysfs_remove_group(&priv->netdev->dev.kobj, &netdev_sysfs);
 }
 
+#if LINUX_VERSION_CODE > KERNEL_VERSION(2,6,28)
+static const struct net_device_ops softing_netdev_ops = {
+	.ndo_open 	= netdev_open,
+	.ndo_stop	= netdev_stop,
+	.ndo_start_xmit	= netdev_start_xmit,
+};
+#endif
+
 static struct softing_priv *mk_netdev(struct softing *card, u16 chip_id)
 {
 	struct net_device *ndev;
@@ -905,9 +913,13 @@ static struct softing_priv *mk_netdev(struct softing *card, u16 chip_id)
 	SET_NETDEV_DEV(ndev, card->dev);
 
 	ndev->flags |= IFF_ECHO;
+#if LINUX_VERSION_CODE > KERNEL_VERSION(2,6,28)
+	ndev->netdev_ops	= &softing_netdev_ops;
+#else
 	ndev->open		= netdev_open;
 	ndev->stop		= netdev_stop;
 	ndev->hard_start_xmit	= netdev_start_xmit;
+#endif
 	priv->can.do_get_state	= candev_get_state;
 	priv->can.do_set_mode	= candev_set_mode;
 

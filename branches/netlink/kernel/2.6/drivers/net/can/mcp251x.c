@@ -3,6 +3,7 @@
  * FIXME: increment can_stats in case of state changes
  * FIXME: state changes by interrupt
  * FIXME: do_set_mode not implemented (required for restart)
+ * FIXME: remove tx timeout callback
  * FIXME: to be tested
  *
  * CAN bus driver for Microchip 251x CAN Controller with SPI Interface
@@ -993,6 +994,15 @@ static void mcp251x_tx_timeout(struct net_device *net)
 	queue_work(priv->wq, &priv->irq_work);
 }
 
+#if LINUX_VERSION_CODE > KERNEL_VERSION(2,6,28)
+static const struct net_device_ops mcp251x_netdev_ops = {
+	.ndo_open	= mcp251x_open,
+	.ndo_stop	= mcp251x_stop,
+	.ndo_start_xmit	= mcp251x_hard_start_xmit,
+	.ndo_tx_timeout	= mcp251x_tx_timeout,
+};
+#endif
+
 static struct net_device *alloc_mcp251x_netdev(int sizeof_priv)
 {
 	struct net_device *net;
@@ -1004,10 +1014,14 @@ static struct net_device *alloc_mcp251x_netdev(int sizeof_priv)
 
 	priv = netdev_priv(net);
 
+#if LINUX_VERSION_CODE > KERNEL_VERSION(2,6,28)
+	net->netdev_ops		= &mcp251x_netdev_ops;
+#else
 	net->open		= mcp251x_open;
 	net->stop		= mcp251x_stop;
 	net->hard_start_xmit	= mcp251x_hard_start_xmit;
 	net->tx_timeout		= mcp251x_tx_timeout;
+#endif
 	net->watchdog_timeo	= HZ;
 
 	priv->can.bittiming_const = &mcp251x_bittiming_const;

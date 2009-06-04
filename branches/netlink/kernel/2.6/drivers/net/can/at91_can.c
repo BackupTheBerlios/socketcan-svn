@@ -3,6 +3,7 @@
  * FIXME: bus-off handling
  * FIXME: review non-standard error counting and statistics
  * FIXME: remove tx timeout callback
+ * FIXME: don't use netdev->base_addr
  * FIXME: to be tested
  *
  * at91_can.c -  CAN network driver for AT91 SoC CAN controller
@@ -159,6 +160,18 @@ struct at91_priv {
 	unsigned int		tx_echo;
 
 	unsigned int		rx_bank;
+};
+
+
+static struct can_bittiming_const at91_bittiming_const = {
+	.tseg1_min = 4,
+	.tseg1_max = 16,
+	.tseg2_min = 2,
+	.tseg2_max = 8,
+	.sjw_max = 4,
+	.brp_min = 2,
+	.brp_max = 128,
+	.brp_inc = 1,
 };
 
 
@@ -1013,17 +1026,14 @@ static int at91_set_mode(struct net_device *dev, u32 _mode)
 }
 
 
-static struct can_bittiming_const at91_bittiming_const = {
-	.tseg1_min = 4,
-	.tseg1_max = 16,
-	.tseg2_min = 2,
-	.tseg2_max = 8,
-	.sjw_max = 4,
-	.brp_min = 2,
-	.brp_max = 128,
-	.brp_inc = 1,
+#if LINUX_VERSION_CODE > KERNEL_VERSION(2,6,28)
+static const struct net_device_ops at91_netdev_ops = {
+	.ndo_open	= at91_open,
+	.ndo_stop	= at91_close,
+	.ndo_start_xmit	= at91_start_xmit,
+	.ndo_tx_timeout	= at91_tx_timeout,
 };
-
+#endif
 
 static int __init at91_can_probe(struct platform_device *pdev)
 {
@@ -1067,10 +1077,14 @@ static int __init at91_can_probe(struct platform_device *pdev)
 		goto exit_iounmap;
 	}
 
+#if LINUX_VERSION_CODE > KERNEL_VERSION(2,6,28)
+	dev->netdev_ops		= &at91_netdev_ops;
+#else
 	dev->open		= at91_open;
 	dev->stop		= at91_close;
 	dev->hard_start_xmit	= at91_start_xmit;
-	dev->tx_timeout	= at91_tx_timeout;
+	dev->tx_timeout		= at91_tx_timeout;
+#endif
 	dev->get_stats		= at91_get_stats;
 	dev->irq		= irq;
 	dev->base_addr		= (unsigned long)addr;
