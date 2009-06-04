@@ -175,8 +175,13 @@ static int can_proc_read_reset(char *page, char **start, off_t off,
 			    && (priv->state != STATE_RESET_MODE)) {
 				len += snprintf(page + len, PAGE_SIZE - len,
 						"%s ", dev->name);
+#if LINUX_VERSION_CODE > KERNEL_VERSION(2,6,28)
+				dev->netdev_ops->ndo_stop(dev);
+				dev->netdev_ops->ndo_open(dev);
+#else
 				dev->stop(dev);
 				dev->open(dev);
+#endif
 				/* count number of restarts */
 				priv->can_stats.restarts++;
 
