@@ -94,7 +94,7 @@ static int sja1000_probe_chip(struct net_device *dev)
 	struct sja1000_priv *priv = netdev_priv(dev);
 
 	if (priv->reg_base && (priv->read_reg(priv, 0) == 0xFF)) {
-		dev_info(dev->dev.parent, "probing @0x%p failed\n",
+		dev_info(ND2D(dev), "probing @0x%p failed\n",
 			 priv->reg_base);
 		return 0;
 	}
