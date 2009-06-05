@@ -14,7 +14,6 @@ modules modules_install clean:
 else
 
 -include $(TOPDIR)/Makefile.common
-#EXTRA_CFLAGS += -I$(TOPDIR)/drivers/net/can/hal
 
 obj-$(CONFIG_CAN_SJA1000) += sja1000.o
 obj-$(CONFIG_CAN_SJA1000_PLATFORM) += sja1000_platform.o
@@ -27,6 +26,8 @@ obj-$(CONFIG_CAN_PEAK_PCI) += peak_pci.o
 obj-$(CONFIG_CAN_PIPCAN) += pipcan.o
 obj-$(CONFIG_CAN_KVASER_PCI) += kvaser_pci.o
 
-ccflags-$(CONFIG_CAN_DEBUG_DEVICES) := -DDEBUG
+ifeq ($(CONFIG_CAN_DEBUG_DEVICES),y)
+	EXTRA_CFLAGS += -DDEBUG
+endif
 
 endif
