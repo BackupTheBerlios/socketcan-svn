@@ -22,14 +22,15 @@
  * definition in your flattened device tree source (DTS) file similar to:
  *
  *   can@3,100 {
- *           compatible = "philips,sja1000";
+ *           compatible = "nxp,sja1000";
  *           reg = <3 0x100 0x80>;
- *           clock-frequency = <8000000>;
- *           cdr-reg = <0x48>;
- *           ocr-reg = <0x0a>;
  *           interrupts = <2 0>;
  *           interrupt-parent = <&mpic>;
+ *           nxp,external-clock-frequency = <16000000>;
  *   };
+ *
+ * See "Documentation/powerpc/dts-bindings/can/sja1000.txt" for further
+ * information.
  */
 
 #include <linux/kernel.h>
@@ -59,7 +60,7 @@ MODULE_LICENSE("GPL v2");
 
 static u8 sja1000_ofp_read_reg(const struct sja1000_priv *priv, int reg)
 {
-  return in_8(priv->reg_base + reg);
+	return in_8(priv->reg_base + reg);
 }
 
 static void sja1000_ofp_write_reg(const struct sja1000_priv *priv,
@@ -83,7 +84,7 @@ static int __devexit sja1000_ofp_remove(struct of_device *ofdev)
 	irq_dispose_mapping(dev->irq);
 
 	of_address_to_resource(np, 0, &res);
-	release_mem_region(res.start, res.end - res.start + 1);
+	release_mem_region(res.start, resource_size(&res));
 
 	return 0;
 }
@@ -105,7 +106,7 @@ static int __devinit sja1000_ofp_probe(struct of_device *ofdev,
 		return err;
 	}
 
-	res_size = res.end - res.start + 1;
+	res_size = resource_size(&res);
 
 	if (!request_mem_region(res.start, res_size, DRV_NAME)) {
 		dev_err(&ofdev->dev, "couldn't request %#x..%#x\n",
@@ -139,32 +140,67 @@ static int __devinit sja1000_ofp_probe(struct of_device *ofdev,
 	priv->read_reg = sja1000_ofp_read_reg;
 	priv->write_reg = sja1000_ofp_write_reg;
 
+	/* backward compatibility */
 	prop = of_get_property(np, "clock-frequency", &prop_size);
+	if (!prop)
+		prop = of_get_property(np, "nxp,external-clock-frequency",
+				       &prop_size);
+
 	if (prop && (prop_size ==  sizeof(u32)))
-		priv->can.clock.freq = *prop;
+		priv->can.clock.freq = *prop / 2;
 	else
-		priv->can.clock.freq = SJA1000_OFP_CAN_CLOCK;
+		priv->can.clock.freq = SJA1000_OFP_CAN_CLOCK; /* default */
 
+	/* backward compatibility */
 	prop = of_get_property(np, "ocr-reg", &prop_size);
-	if (prop && (prop_size == sizeof(u32)))
+	if (prop && (prop_size == sizeof(u32))) {
 		priv->ocr = (u8)*prop;
-	else
-		priv->ocr = SJA1000_OFP_OCR;
+	} else {
 
+		prop = of_get_property(np, "nxp,tx-output-mode", &prop_size);
+		if (prop && (prop_size == sizeof(u32)))
+			priv->ocr |= *prop & OCR_MODE_MASK;
+		else
+			priv->ocr |= OCR_MODE_NORMAL; /* default */
+
+		prop = of_get_property(np, "nxp,tx-output-config", &prop_size);
+		if (prop && (prop_size == sizeof(u32)))
+			priv->ocr |= (*prop << OCR_TX_SHIFT) & OCR_TX_MASK;
+		else
+			priv->ocr |= OCR_TX0_PULLDOWN; /* default */
+	}
+
+	/* backward compatibility */
 	prop = of_get_property(np, "cdr-reg", &prop_size);
-	if (prop && (prop_size == sizeof(u32)))
+	if (prop && (prop_size == sizeof(u32))) {
 		priv->cdr = (u8)*prop;
-	else
-		priv->cdr = SJA1000_OFP_CDR;
+	} else {
+		prop = of_get_property(np, "nxp,clock-out-frequency",
+				       &prop_size);
+		if (prop && (prop_size == sizeof(u32)) && *prop) {
+			u32 divider = priv->can.clock.freq * 2 / *prop;
+
+			if (divider > 1)
+				priv->cdr |= divider / 2 - 1;
+			else
+				priv->cdr |= CDR_CLKOUT_MASK;
+		} else {
+			priv->cdr |= CDR_CLK_OFF; /* default */
+		}
+
+		prop = of_get_property(np, "nxp,no-comparator-bypass", NULL);
+		if (!prop)
+			priv->cdr |= CDR_CBP; /* default */
+	}
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,18)
 	priv->irq_flags = SA_SHIRQ;
 #else
 	priv->irq_flags = IRQF_SHARED;
 #endif
+	priv->reg_base = base;
 
 	dev->irq = irq;
-	priv->reg_base = base;
 
 	dev_info(&ofdev->dev,
 		 "reg_base=0x%p irq=%d clock=%d ocr=0x%02x cdr=0x%02x\n",
