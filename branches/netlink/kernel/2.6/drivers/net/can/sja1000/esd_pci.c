@@ -117,14 +117,14 @@ static struct pci_device_id esd_pci_tbl[] = {
 
 MODULE_DEVICE_TABLE(pci, esd_pci_tbl);
 
-static u8 esd_pci_read_reg(const struct net_device *ndev, int port)
+static u8 esd_pci_read_reg(const struct sja1000_priv *priv, int port)
 {
-	return readb((void __iomem *)(ndev->base_addr + port));
+	return readb(priv->reg_base + port);
 }
 
-static void esd_pci_write_reg(const struct net_device *ndev, int port, u8 val)
+static void esd_pci_write_reg(const struct sja1000_priv *priv, int port, u8 val)
 {
-	writeb(val, (void __iomem *)(ndev->base_addr + port));
+	writeb(val, priv->reg_base + port);
 }
 
 static void esd_pci_del_chan(struct pci_dev *pdev, struct net_device *ndev)
@@ -149,7 +149,7 @@ static struct net_device * __devinit esd_pci_add_chan(struct pci_dev *pdev,
 
 	priv = netdev_priv(ndev);
 
-	ndev->base_addr = (unsigned long)base_addr;
+	priv->reg_base = base_addr;
 
 	priv->read_reg = esd_pci_read_reg;
 	priv->write_reg = esd_pci_write_reg;
@@ -167,8 +167,8 @@ static struct net_device * __devinit esd_pci_add_chan(struct pci_dev *pdev,
 #endif
 	ndev->irq = pdev->irq;
 
-	dev_dbg(&pdev->dev, "base_addr=%#lx irq=%d\n",
-			ndev->base_addr, ndev->irq);
+	dev_dbg(&pdev->dev, "reg_base=0x%p irq=%d\n",
+			priv->reg_base, ndev->irq);
 
 	SET_NETDEV_DEV(ndev, &pdev->dev);
 

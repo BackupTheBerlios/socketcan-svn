@@ -99,14 +99,15 @@ MODULE_DEVICE_TABLE (pcmcia, ems_pcmcia_tbl);
 
 static void ems_pcmcia_config(struct pcmcia_device *dev);
 
-static u8 ems_pcmcia_read_reg(const struct net_device *dev, int port)
+static u8 ems_pcmcia_read_reg(const struct sja1000_priv *priv, int port)
 {
-	return readb((void __iomem *)dev->base_addr + port);
+	return readb(priv->reg_base + port);
 }
 
-static void ems_pcmcia_write_reg(const struct net_device *dev, int port, u8 val)
+static void ems_pcmcia_write_reg(const struct sja1000_priv *priv,
+				 int port, u8 val)
 {
-	writeb(val, (void __iomem *)dev->base_addr + port);
+	writeb(val, priv->reg_base + port);
 }
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,19)
@@ -151,17 +152,17 @@ static irqreturn_t ems_pcmcia_interrupt(int irq, void *dev_id)
  * Check if a CAN controller is present at the specified location
  * by trying to set 'em into the PeliCAN mode
  */
-static inline int ems_pcmcia_check_chan(struct net_device *dev)
+static inline int ems_pcmcia_check_chan(struct sja1000_priv *priv)
 {
 	unsigned char res;
 
 	/* Make sure SJA1000 is in reset mode */
-	ems_pcmcia_write_reg(dev, REG_MOD, 1);
+	ems_pcmcia_write_reg(priv, REG_MOD, 1);
 
-	ems_pcmcia_write_reg(dev, REG_CDR, CDR_PELICAN);
+	ems_pcmcia_write_reg(priv, REG_CDR, CDR_PELICAN);
 
 	/* read reset-values */
-	res = ems_pcmcia_read_reg(dev, REG_CDR);
+	res = ems_pcmcia_read_reg(priv, REG_CDR);
 
 	if (res == CDR_PELICAN)
 		return 1;
@@ -270,12 +271,12 @@ static int __devinit ems_pcmcia_add_card(struct pcmcia_device *pdev,
 		priv->irq_flags = IRQF_SHARED;
 #endif
 		dev->irq = pdev->irq.AssignedIRQ;
-		dev->base_addr = (unsigned long)(card->base_addr
+		priv->reg_base = (card->base_addr
 					+ EMS_PCMCIA_CAN_BASE_OFFSET
 					+ (i * EMS_PCMCIA_CAN_CTRL_SIZE));
 
 		/* Check if channel is present */
-		if (ems_pcmcia_check_chan(dev)) {
+		if (ems_pcmcia_check_chan(priv)) {
 			priv->read_reg  = ems_pcmcia_read_reg;
 			priv->write_reg = ems_pcmcia_write_reg;
 			priv->can.clock.freq = EMS_PCMCIA_CAN_CLOCK;
@@ -295,8 +296,8 @@ static int __devinit ems_pcmcia_add_card(struct pcmcia_device *pdev,
 			card->channels++;
 
 			printk(KERN_INFO "%s: registered %s on channel "
-			       "#%d at %lX, irq %d\n", DRV_NAME, dev->name,
-			       i, dev->base_addr, dev->irq);
+			       "#%d at 0x%p, irq %d\n", DRV_NAME, dev->name,
+			       i, priv->reg_base, dev->irq);
 		} else {
 			free_sja1000dev(dev);
 		}

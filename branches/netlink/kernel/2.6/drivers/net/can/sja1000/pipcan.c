@@ -49,14 +49,14 @@ MODULE_LICENSE("GPL v2");
 #define PIPCAN_RES        (0x804)
 #define PIPCAN_RST        (0x805)
 
-static u8 pc_read_reg(const struct net_device *dev, int reg)
+static u8 pc_read_reg(const struct sja1000_priv *priv, int reg)
 {
-	return inb(dev->base_addr + reg);
+  return inb((unsigned long)priv->reg_base + reg);
 }
 
-static void pc_write_reg(const struct net_device *dev, int reg, u8 val)
+static void pc_write_reg(const struct sja1000_priv *priv, int reg, u8 val)
 {
-	outb(val, dev->base_addr + reg);
+  outb(val, (unsigned long)priv->reg_base + reg);
 }
 
 static int __init pc_probe(struct platform_device *pdev)
@@ -96,6 +96,7 @@ static int __init pc_probe(struct platform_device *pdev)
 
 	dev->irq = irq;
 	dev->base_addr = res->start;
+	priv->reg_base = (void __iomem *)res->start;
 
 	dev_set_drvdata(&pdev->dev, dev);
 	SET_NETDEV_DEV(dev, &pdev->dev);

@@ -86,23 +86,19 @@ static struct pci_device_id peak_pci_tbl[] = {
 
 MODULE_DEVICE_TABLE(pci, peak_pci_tbl);
 
-static u8 peak_pci_read_reg(const struct net_device *dev, int port)
+static u8 peak_pci_read_reg(const struct sja1000_priv *priv, int port)
 {
-	u8 val;
-	val = readb((const volatile void __iomem *)
-		    (dev->base_addr + (port << 2)));
-	return val;
+	return readb(priv->reg_base + (port << 2));
 }
 
-static void peak_pci_write_reg(const struct net_device *dev, int port, u8 val)
+static void peak_pci_write_reg(const struct sja1000_priv *priv,
+			       int port, u8 val)
 {
-	writeb(val, (volatile void __iomem *)
-	       (dev->base_addr + (port << 2)));
+	writeb(val, priv->reg_base + (port << 2));
 }
 
-static void peak_pci_post_irq(const struct net_device *dev)
+static void peak_pci_post_irq(const struct sja1000_priv *priv)
 {
-	struct sja1000_priv *priv = netdev_priv(dev);
 	struct peak_pci *board = priv->priv;
 	u16 icr_low;
 
@@ -145,7 +141,7 @@ static void peak_pci_del_chan(struct net_device *dev, int init_step)
 			icr_high &= ~0x0002;
 		writew(icr_high, board->conf_addr + PITA_ICR + 2);
 	case 3:
-		iounmap((void *)dev->base_addr);
+		iounmap(priv->reg_base);
 	case 2:
 		if (board->channel != PEAK_PCI_SLAVE)
 			iounmap((void *)board->conf_addr);
@@ -211,8 +207,8 @@ static int peak_pci_add_chan(struct pci_dev *pdev, int channel,
 	if (channel == PEAK_PCI_SLAVE)
 		addr += PCI_PORT_SIZE;
 
-	dev->base_addr = (unsigned long)ioremap(addr, PCI_PORT_SIZE);
-	if (dev->base_addr == 0) {
+	priv->reg_base = ioremap(addr, PCI_PORT_SIZE);
+	if (priv->reg_base == 0) {
 		err = -ENOMEM;
 		goto failure;
 	}
@@ -259,8 +255,8 @@ static int peak_pci_add_chan(struct pci_dev *pdev, int channel,
 	if (channel != PEAK_PCI_SLAVE)
 		*master_dev = dev;
 
-	printk(KERN_INFO "%s: %s at base_addr=%#lx conf_addr=%p irq=%d\n",
-	       DRV_NAME, dev->name, dev->base_addr, board->conf_addr, dev->irq);
+	printk(KERN_INFO "%s: %s at reg_base=0x%p conf_addr=%p irq=%d\n",
+	       DRV_NAME, dev->name, priv->reg_base, board->conf_addr, dev->irq);
 
 	return 0;
 

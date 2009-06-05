@@ -57,19 +57,21 @@ MODULE_LICENSE("GPL v2");
 #define SJA1000_OFP_OCR        OCR_TX0_PULLDOWN
 #define SJA1000_OFP_CDR        (CDR_CBP | CDR_CLK_OFF)
 
-static u8 sja1000_ofp_read_reg(const struct net_device *dev, int reg)
+static u8 sja1000_ofp_read_reg(const struct sja1000_priv *priv, int reg)
 {
-	return in_8((void __iomem *)(dev->base_addr + reg));
+  return in_8(priv->reg_base + reg);
 }
 
-static void sja1000_ofp_write_reg(const struct net_device *dev, int reg, u8 val)
+static void sja1000_ofp_write_reg(const struct sja1000_priv *priv,
+				  int reg, u8 val)
 {
-	out_8((void __iomem *)(dev->base_addr + reg), val);
+	out_8(priv->reg_base + reg, val);
 }
 
 static int __devexit sja1000_ofp_remove(struct of_device *ofdev)
 {
 	struct net_device *dev = dev_get_drvdata(&ofdev->dev);
+	struct sja1000_priv *priv = netdev_priv(dev);
 	struct device_node *np = ofdev->node;
 	struct resource res;
 
@@ -77,7 +79,7 @@ static int __devexit sja1000_ofp_remove(struct of_device *ofdev)
 
 	unregister_sja1000dev(dev);
 	free_sja1000dev(dev);
-	iounmap((void __iomem *)dev->base_addr);
+	iounmap(priv->reg_base);
 	irq_dispose_mapping(dev->irq);
 
 	of_address_to_resource(np, 0, &res);
@@ -162,11 +164,11 @@ static int __devinit sja1000_ofp_probe(struct of_device *ofdev,
 #endif
 
 	dev->irq = irq;
-	dev->base_addr = (unsigned long)base;
+	priv->reg_base = base;
 
 	dev_info(&ofdev->dev,
-		 "base=0x%lx irq=%d clock=%d ocr=0x%02x cdr=0x%02x\n",
-		 dev->base_addr, dev->irq, priv->can.clock.freq,
+		 "reg_base=0x%p irq=%d clock=%d ocr=0x%02x cdr=0x%02x\n",
+		 priv->reg_base, dev->irq, priv->can.clock.freq,
 		 priv->ocr, priv->cdr);
 
 	dev_set_drvdata(&ofdev->dev, dev);

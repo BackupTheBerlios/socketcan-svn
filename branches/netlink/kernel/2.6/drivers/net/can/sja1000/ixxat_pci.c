@@ -91,16 +91,15 @@ static inline void *kzalloc(size_t size, unsigned int __nocast flags)
 }
 #endif
 
-static u8 ixxat_pci_read_reg(const struct net_device *ndev, int port)
+static u8 ixxat_pci_read_reg(const struct sja1000_priv *priv, int port)
 {
-	u8 val;
-	val = readb((void __iomem *)(ndev->base_addr + port));
-	return val;
+	return readb(priv->reg_base + port);
 }
 
-static void ixxat_pci_write_reg(const struct net_device *ndev, int port, u8 val)
+static void ixxat_pci_write_reg(const struct sja1000_priv *priv,
+				int port, u8 val)
 {
-	writeb(val, (void __iomem *)(ndev->base_addr + port));
+	writeb(val, priv->reg_base + port);
 }
 
 static void ixxat_pci_del_chan(struct pci_dev *pdev, struct net_device *ndev)
@@ -125,7 +124,7 @@ static struct net_device *ixxat_pci_add_chan(struct pci_dev *pdev,
 
 	priv = netdev_priv(ndev);
 
-	ndev->base_addr = (unsigned long)base_addr;
+	priv->reg_base = base_addr;
 
 	priv->read_reg = ixxat_pci_read_reg;
 	priv->write_reg = ixxat_pci_write_reg;
@@ -142,8 +141,8 @@ static struct net_device *ixxat_pci_add_chan(struct pci_dev *pdev,
 #endif
 	ndev->irq = pdev->irq;
 
-	dev_dbg(&pdev->dev, "base_addr=%#lx irq=%d\n",
-			ndev->base_addr, ndev->irq);
+	dev_dbg(&pdev->dev, "reg_base=0x%p irq=%d\n",
+			priv->reg_base, ndev->irq);
 
 	SET_NETDEV_DEV(ndev, &pdev->dev);
 
