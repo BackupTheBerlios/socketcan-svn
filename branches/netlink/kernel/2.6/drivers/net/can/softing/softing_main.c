@@ -1,8 +1,4 @@
 /*
-* FIXME: coding style issues!
-* FIXME: check softing_flush_echo_skb and bus_off handling.
-* FIXME: to be tested
-*
 * drivers/net/can/softing/softing_main.c
 *
 * Copyright (C) 2008

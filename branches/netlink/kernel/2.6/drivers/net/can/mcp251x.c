@@ -1,11 +1,4 @@
 /*
- * FIXME: echo support missing (requilred for IFF_ECHO)
- * FIXME: increment can_stats in case of state changes
- * FIXME: state changes by interrupt
- * FIXME: do_set_mode not implemented (required for restart)
- * FIXME: remove tx timeout callback
- * FIXME: to be tested
- *
  * CAN bus driver for Microchip 251x CAN Controller with SPI Interface
  *
  * MCP2510 support and bug fixes by Christian Pellegrin

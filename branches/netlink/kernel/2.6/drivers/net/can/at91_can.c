@@ -1,11 +1,4 @@
 /*
- * FIXME: remove at91_get_state() as already done by upper layer
- * FIXME: bus-off handling
- * FIXME: review non-standard error counting and statistics
- * FIXME: remove tx timeout callback
- * FIXME: don't use netdev->base_addr
- * FIXME: to be tested
- *
  * at91_can.c -  CAN network driver for AT91 SoC CAN controller
  *
  * (C) 2007 by Hans J. Koch <hjk@linutronix.de>
