@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009 Thomas Körper <thomas.koerper@esd.eu>, esd gmbh
+ * Copyright (C) 2009 Thomas Koerper <thomas.koerper@esd.eu>, esd gmbh
  * derived from kernel/2.6/drivers/net/can/sja1000/esd_pci.c,
  * * Copyright (C) 2007 Wolfgang Grandegger <wg@grandegger.com>
  * * Copyright (C) 2008 Sascha Hauer <s.hauer@pengutronix.de>, Pengutronix
@@ -35,15 +35,15 @@
 #include <linux/byteorder/generic.h>
 #include <linux/pci.h>
 #include <linux/pci_ids.h>
-#include <linux/can.h>
-#include <linux/can/error.h>
-#include <linux/can/dev.h>
+#include <socketcan/can.h>
+#include <socketcan/can/error.h>
+#include <socketcan/can/dev.h>
 
 #define DRV_NAME "esd_pci331"
 
-MODULE_AUTHOR("Thomas Körper <thomas.koerper@esd.eu>");
+MODULE_AUTHOR("Thomas Koerper <thomas.koerper@esd.eu>");
 MODULE_LICENSE("GPL v2");
-MODULE_DESCRIPTION("LLCF/socketcan '" DRV_NAME "' network device driver");
+MODULE_DESCRIPTION("Socket-CAN driver for the esd 331 CAN cards");
 MODULE_DEVICE_TABLE(pci, esd331_pci_tbl);
 MODULE_SUPPORTED_DEVICE("esd CAN-PCI/331, CAN-CPCI/331, CAN-PMC/331");
 
@@ -54,29 +54,50 @@ MODULE_SUPPORTED_DEVICE("esd CAN-PCI/331, CAN-CPCI/331, CAN-PMC/331");
 #define ESD_PCI_SUB_SYS_ID_PCI331 0x0001
 #define ESD_PCI_SUB_SYS_ID_PMC331 0x000C
 
-#define ESD331_MAX_CAN 2 /* Maximum number of interfaces supported per card */
-#define ESD331_DPRSIZE 1024 /* 331's fifo size. Don't change! */
-#define ESD331_MAX_INTERRUPT_WORK 8 /* Max. messages to handle per interrupt */
+/* Maximum number of interfaces supported per card */
+#define ESD331_MAX_CAN			2
+/* 331's fifo size. Don't change! */
+#define ESD331_DPRSIZE			1024
+/* Max. messages to handle per interrupt */
+#define ESD331_MAX_INTERRUPT_WORK	8
+#define ESD331_MAX_BOARD_MESSAGES	5
+#define ESD331_RTR_FLAG			0x10
+#define ESD331_ERR_OK			0x00
+#define ESD331_ERR_WARN			0x40
+#define ESD331_ERR_BUSOFF1		0x80
+#define ESD331_ERR_BUSOFF2		0xc0
+#define ESD331_CONF_OFFS_ICS		0x4c
+#define ESD331_CONF_OFFS_MISC_CTRL	0x50
+#define ESD331_OFFS_LINK_BASE		0x846
+#define ESD331_OFFS_IRQ_ACK		0xc0100
+#define ESD331_NETS_MASK		0x07
+#define ESD331_EVENT_MASK		0x7f
+#define ESD331_DLC_MASK			0x0f
+#define ESD331_EFF_SUPP_FLAG		0x80
+#define ESD331_IRQ_FLAG			0x00000004
+#define ESD331_ENABLE_IRQ_FLAG		0x00000041
+#define ESD331_STOP_OS			0x40000010
+#define ESD331_RESTART_OS		0x40000028
 
-#define ESD331_I20_BCAN		0
-#define ESD331_I20_ENABLE	1
-#define ESD331_I20_BAUD		4
-#define ESD331_I20_TXDONE	5
-#define ESD331_I20_TXTOUT	12
-#define ESD331_I20_ERROR	13
-#define ESD331_I20_BOARD	14
-#define ESD331_I20_EX_BCAN	15
-#define ESD331_I20_EX_TXDONE	16
-#define ESD331_I20_EX_TXTOUT	17
-#define ESD331_I20_BOARD2	20
-#define ESD331_I20_FAST		21
+#define ESD331_I20_BCAN			0
+#define ESD331_I20_ENABLE		1
+#define ESD331_I20_BAUD			4
+#define ESD331_I20_TXDONE		5
+#define ESD331_I20_TXTOUT		12
+#define ESD331_I20_ERROR		13
+#define ESD331_I20_BOARD		14
+#define ESD331_I20_EX_BCAN		15
+#define ESD331_I20_EX_TXDONE		16
+#define ESD331_I20_EX_TXTOUT		17
+#define ESD331_I20_BOARD2		20
+#define ESD331_I20_FAST			21
 
 static struct pci_device_id esd331_pci_tbl[] = {
-		{PCI_VENDOR_ID_PLX, PCI_DEVICE_ID_PLX_9050,
-		PCI_VENDOR_ID_ESDGMBH, ESD_PCI_SUB_SYS_ID_PCI331},
-		{PCI_VENDOR_ID_PLX, PCI_DEVICE_ID_PLX_9030,
-		PCI_VENDOR_ID_ESDGMBH, ESD_PCI_SUB_SYS_ID_PMC331},
-		{0, }
+	{PCI_VENDOR_ID_PLX, PCI_DEVICE_ID_PLX_9050,
+	PCI_VENDOR_ID_ESDGMBH, ESD_PCI_SUB_SYS_ID_PCI331},
+	{PCI_VENDOR_ID_PLX, PCI_DEVICE_ID_PLX_9030,
+	PCI_VENDOR_ID_ESDGMBH, ESD_PCI_SUB_SYS_ID_PMC331},
+	{0, }
 };
 
 struct esd331_can_msg {
@@ -125,70 +146,90 @@ struct esd331_pci {
 struct esd331_priv {
 	struct can_priv can; /* must be the first member! */
 	struct esd331_pci *board;
-	u8 boardsNet;
+	u8 boards_net;
 };
 
-#if LINUX_VERSION_CODE > KERNEL_VERSION(2,6,28)
-static const struct net_device_ops esd331_netdev_ops = {
-	.ndo_open = esd331_open,
-	.ndo_stop = esd331_close,
-	.ndo_start_xmit = esd331_start_xmit,
+struct esd331_baud_entry {
+	u32 rate;
+	u16 index;
 };
-#endif
 
-static void esd331_reset(void *pci331_confspace)
+static struct esd331_baud_entry esd331_baud_table[] = {
+	{1600000, 15},
+	{1000000, 0},
+	{800000, 14},
+	{666666, 1},
+	{500000, 2},
+	{333333, 3},
+	{250000, 4},
+	{166666, 5},
+	{125000, 6},
+	{100000, 7},
+	{83333, 16},
+	{66666, 8},
+	{50000, 9},
+	{33333, 10},
+	{20000, 11},
+	{12500, 12},
+	{10000, 13}
+};
+
+static void esd331_reset(void *pci331_confspace, int wait_for_restart)
 {
 	unsigned long data;
+	void __iomem *addr = pci331_confspace + ESD331_CONF_OFFS_MISC_CTRL;
 
-	data = readl((u8 *)pci331_confspace + 0x50);
-	data |= 0x40000010;
-	writel(data, (u8 *)pci331_confspace + 0x50);
+	data = readl(addr);
+	data |= ESD331_STOP_OS;
+	writel(data, addr);
 	msleep(10);
 
-	data = readl((u8 *)pci331_confspace + 0x50);
-	data &= ~0x40000028;
-	writel(data, (u8 *)pci331_confspace + 0x50);
+	data = readl(addr);
+	data &= ~ESD331_RESTART_OS;
+	writel(data, addr);
 
-	msleep(3500);
+	if (wait_for_restart)
+		msleep_interruptible(3500);
 }
 
-static struct esd331_dpr *esd331_initPointer(void *pci331_space2)
+static struct esd331_dpr *esd331_init_pointer(void __iomem *pci331_space2)
 {
 	unsigned long data;
-	u8 *ptr;
 	struct esd331_idp *idp;
+	void __iomem *ptr = pci331_space2 + ESD331_OFFS_LINK_BASE;
 
-	ptr = (u8 *)pci331_space2 + 0x846;
 	data = readb(ptr++);
 	data = (data << 8) + readb(ptr++);
 	data = (data << 8) + readb(ptr++);
 	data = (data << 8) + readb(ptr++);
 
-	idp = (struct esd331_idp *)((u8 *)pci331_space2 + data);
+	idp = (struct esd331_idp *)(pci331_space2 + data);
 	data = idp->buffer[0];
 	data = (data << 8) + idp->buffer[1];
 	data = (data << 8) + idp->buffer[2];
 	data = (data << 8) + idp->buffer[3];
 
-	return (struct esd331_dpr *)((u8 *)pci331_space2 + data);
+	return (struct esd331_dpr *)(pci331_space2 + data);
 }
 
-static void esd331_enableIRQ(void *pci331_confspace)
+static void esd331_enable_irq(void *pci331_confspace)
 {
+	void __iomem *addr = pci331_confspace + ESD331_CONF_OFFS_ICS;
 	u32 data;
 
-	data = readl((u8 *)pci331_confspace + 0x4c);
-	data |= 0x00000041;
-	writel(data, (u8 *)pci331_confspace + 0x4c);
+	data = readl(addr);
+	data |= ESD331_ENABLE_IRQ_FLAG;
+	writel(data, addr);
 }
 
-static void esd331_disableIRQ(void *pci331_confspace)
+static void esd331_disable_irq(void *pci331_confspace)
 {
+	void __iomem *addr = pci331_confspace + ESD331_CONF_OFFS_ICS;
 	u32 data;
 
-	data = readl((u8 *)pci331_confspace + 0x4c);
-	data &= ~0x00000041;
-	writel(data, (u8 *)pci331_confspace + 0x4c);
+	data = readl(addr);
+	data &= ~ESD331_ENABLE_IRQ_FLAG;
+	writel(data, addr);
 }
 
 static int esd331_write(struct esd331_can_msg *mesg, struct esd331_pci *board)
@@ -197,7 +238,7 @@ static int esd331_write(struct esd331_can_msg *mesg, struct esd331_pci *board)
 	u16 in_new;
 	u16 out;
 	unsigned long irq_flags;
-	int err = -1;
+	int err = -EAGAIN; /* = card's fifo full */
 	int i;
 
 	spin_lock_irqsave(&board->irq_lock, irq_flags);
@@ -210,6 +251,7 @@ static int esd331_write(struct esd331_can_msg *mesg, struct esd331_pci *board)
 	if (in_new != out) {
 		u16 *ptr1;
 		u16 *ptr2;
+
 		ptr1 = (u16 *)mesg;
 		ptr2 = (u16 *)&board->dpr->rx_buff[in];
 		for (i = 0; i < ESD331_CM_SSIZE; i++)
@@ -231,7 +273,7 @@ static int esd331_read(struct esd331_can_msg *mesg, struct esd331_pci *board)
 	u16 in;
 	u16 out;
 	unsigned long irq_flags;
-	int err = -1;
+	int err = -ENODATA;
 
 	spin_lock_irqsave(&board->irq_lock, irq_flags);
 
@@ -242,6 +284,7 @@ static int esd331_read(struct esd331_can_msg *mesg, struct esd331_pci *board)
 		u16 *ptr1;
 		u16 *ptr2;
 		int ll;
+
 		ptr1 = (u16 *)mesg;
 		ptr2 = (u16 *)&board->dpr->tx_buff[out];
 		for (ll = 0; ll < ESD331_CM_SSIZE; ll++)
@@ -267,11 +310,10 @@ static int esd331_read(struct esd331_can_msg *mesg, struct esd331_pci *board)
 }
 
 static int esd331_send(struct esd331_pci *board, u8 pci331net, unsigned long id,
-					int eff, int rtr, u16 dlc, u8 *data)
+			int eff, int rtr, u16 dlc, u8 *data)
 {
 	struct esd331_can_msg msg;
-	int l;
-	int res;
+	int i;
 
 	memset(&msg, 0, sizeof(msg));
 
@@ -284,15 +326,13 @@ static int esd331_send(struct esd331_pci *board, u8 pci331net, unsigned long id,
 		msg.id = cpu_to_be16(id);
 	}
 	msg.net = pci331net;
-	msg.len = cpu_to_be16(rtr ? dlc | 0x10 : dlc);
+	msg.len = cpu_to_be16(rtr ? dlc | ESD331_RTR_FLAG : dlc);
 
-	l = (dlc < 8) ? dlc : 8;
-	while (l--)
-		msg.data[l] = data[l];
+	i = (dlc < 8) ? dlc : 8;
+	while (i--)
+		msg.data[i] = data[i];
 
-	res = esd331_write(&msg, board);
-
-	return res;
+	return esd331_write(&msg, board);
 }
 
 static int esd331_write_allid(u8 net, struct esd331_pci *board)
@@ -307,13 +347,14 @@ static int esd331_write_allid(u8 net, struct esd331_pci *board)
 
 	for (id = 0; id < 2048; id++) {
 		int retryCount = 5;
+
 		mesg.id = cpu_to_be16(id);
 
 		while (esd331_write(&mesg, board) && (retryCount--))
 			msleep(1);
 
 		if (retryCount == 0)
-			return -1;
+			return -EIO;
 	}
 
 	return 0;
@@ -337,15 +378,15 @@ static int esd331_write_baud(u8 pci331net, int index, struct esd331_pci *board)
 	mesg.cmmd = ESD331_I20_BAUD;
 	mesg.net = pci331net;
 	mesg.data[0] = (u8)(index >> 8);
-	mesg.data[1] = (u8)0x100;
+	mesg.data[1] = (u8)index;
 
 	return esd331_write(&mesg, board);
 }
 
-static int esd331_read_feat(struct esd331_pci *board)
+static int esd331_read_features(struct esd331_pci *board)
 {
 	struct esd331_can_msg msg;
-	int max_msg = 5;
+	int max_msg = ESD331_MAX_BOARD_MESSAGES;
 
 	board->net_count = 0;
 	board->eff_supp = 0;
@@ -353,34 +394,37 @@ static int esd331_read_feat(struct esd331_pci *board)
 	while ((esd331_read(&msg, board) == 0) && (max_msg--)) {
 		if (msg.cmmd == ESD331_I20_BOARD) {
 			u8 magic = (msg.x1 >> 8);
+
 			if (magic == 0) {
 				u8 features = (u8)msg.x1;
-				u8 nets = (features & 0x07);
-				if ((nets >= 0) && (nets <= ESD331_MAX_CAN))
+				u8 nets = (features & ESD331_NETS_MASK);
+
+				if (nets <= ESD331_MAX_CAN)
 					board->net_count = nets;
 
-				if (features & 0x80)
+				if (features & ESD331_EFF_SUPP_FLAG)
 					board->eff_supp = 1;
 			}
 		} else if (msg.cmmd == ESD331_I20_BOARD2) {
 			u8 features = msg.net;
 
-			if (features & 0x80)
+			if (features & ESD331_EFF_SUPP_FLAG)
 				board->eff_supp = 1;
 
 			if (board->net_count == 0) {
-				u8 nets = (features & 0x07);
-				if ((nets >= 0) && (nets <= ESD331_MAX_CAN))
+				u8 nets = (features & ESD331_NETS_MASK);
+
+				if (nets <= ESD331_MAX_CAN)
 					board->net_count = nets;
 			}
 		}
 	}
 
-	return board->net_count < 1;
+	return (board->net_count < 1) ? -EIO : 0;
 }
 
 static int esd331_create_err_frame(struct net_device *dev, canid_t idflags,
-									u8 d1)
+					u8 d1)
 {
 	struct net_device_stats *stats;
 	struct can_frame *cf;
@@ -411,7 +455,7 @@ static int esd331_create_err_frame(struct net_device *dev, canid_t idflags,
 }
 
 static void esd331_irq_rx(struct net_device *dev, struct esd331_can_msg *msg,
-									int eff)
+				int eff)
 {
 	struct net_device_stats *stats = &dev->stats;
 	struct can_frame *cfrm;
@@ -434,13 +478,13 @@ static void esd331_irq_rx(struct net_device *dev, struct esd331_can_msg *msg,
 	} else {
 		cfrm->can_id = msg->id;
 	}
-	if (msg->len & 0x10)
+	if (msg->len & ESD331_RTR_FLAG)
 		cfrm->can_id |= CAN_RTR_FLAG;
 
 	if (eff)
 		cfrm->can_id |= CAN_EFF_FLAG;
 
-	cfrm->can_dlc = msg->len & 0x0F;
+	cfrm->can_dlc = msg->len & ESD331_DLC_MASK;
 
 	if (cfrm->can_dlc > 8)
 		cfrm->can_dlc = 8;
@@ -456,33 +500,33 @@ static void esd331_irq_rx(struct net_device *dev, struct esd331_can_msg *msg,
 }
 
 static void esd331_handle_errmsg(struct net_device *dev,
-						struct esd331_can_msg *msg)
+					struct esd331_can_msg *msg)
 {
 	struct esd331_priv *priv = netdev_priv(dev);
 
-	if (msg->id & 0x7F)
+	if (msg->id & ESD331_EVENT_MASK)
 		return;
 
 	switch (msg->data[1]) {
-	case 0x00:
+	case ESD331_ERR_OK:
 		if (priv->can.state != CAN_STATE_STOPPED)
-			priv->can.state = CAN_STATE_ACTIVE;
+			priv->can.state = CAN_STATE_ERROR_ACTIVE;
 		break;
 
-	case 0x40:
-		if ((priv->can.state != CAN_STATE_BUS_WARNING)
+	case ESD331_ERR_WARN:
+		if ((priv->can.state != CAN_STATE_ERROR_WARNING)
 				&& (priv->can.state != CAN_STATE_STOPPED)) {
 			priv->can.can_stats.error_warning++;
-			priv->can.state = CAN_STATE_BUS_WARNING;
+			priv->can.state = CAN_STATE_ERROR_WARNING;
 
 			/* might be RX warning, too... */
 			esd331_create_err_frame(dev, CAN_ERR_CRTL,
-					CAN_ERR_CRTL_TX_WARNING);
+						CAN_ERR_CRTL_TX_WARNING);
 		}
 		break;
 
-	case 0x80:
-	case 0xC0:
+	case ESD331_ERR_BUSOFF1:
+	case ESD331_ERR_BUSOFF2:
 		if ((priv->can.state != CAN_STATE_BUS_OFF)
 				&& (priv->can.state != CAN_STATE_STOPPED)) {
 			priv->can.state = CAN_STATE_BUS_OFF;
@@ -533,7 +577,8 @@ static void esd331_handle_messages(struct esd331_pci *board)
 		case ESD331_I20_TXTOUT:
 		case ESD331_I20_EX_TXTOUT:
 			stats->tx_errors++;
-			can_get_echo_skb(board->dev[msg.net], 0);
+			stats->tx_dropped++;
+			can_free_echo_skb(board->dev[msg.net], 0);
 			netif_wake_queue(board->dev[msg.net]);
 			break;
 
@@ -547,6 +592,24 @@ static void esd331_handle_messages(struct esd331_pci *board)
 	}
 }
 
+static int esd331_all_nets_stopped(struct esd331_pci *board)
+{
+	int i;
+
+	for (i = 0; i < ESD331_MAX_CAN; i++) {
+		if (board->dev[i] == NULL) {
+			break;
+		} else {
+			struct esd331_priv *priv = netdev_priv(board->dev[i]);
+
+			if (priv->can.state != CAN_STATE_STOPPED)
+				return 0;
+		}
+	}
+
+	return 1;
+}
+
 #if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,19)
 irqreturn_t esd331_interrupt(int irq, void *dev_id, struct pt_regs *regs)
 #else
@@ -554,27 +617,24 @@ irqreturn_t esd331_interrupt(int irq, void *dev_id)
 #endif
 {
 	struct esd331_pci *board = (struct esd331_pci *)dev_id;
+	void __iomem *ics = board->conf_addr + ESD331_CONF_OFFS_ICS;
 
-	if (!(readl((u8 *)(board->conf_addr) + 0x4c) & 0x04))
+	if (!(readl(ics) & ESD331_IRQ_FLAG))
 		return IRQ_NONE;
 
-	writew(0xffff, (u8 *)board->base_addr2 + 0xc0100);
-
+	writew(0xffff, board->base_addr2 + ESD331_OFFS_IRQ_ACK);
 	esd331_handle_messages(board);
 
 	return IRQ_HANDLED;
 }
-EXPORT_SYMBOL_GPL(esd331_interrupt);
 
 /* also enables interrupt when no other net on card is openened yet */
 static int esd331_open(struct net_device *dev)
 {
 	struct esd331_priv *priv = netdev_priv(dev);
-	int i;
-	int enable_int = 1;
 	int err;
 
-	err = can_set_bittiming(dev);
+	err = open_candev(dev);
 	if (err)
 		return err;
 
@@ -582,24 +642,10 @@ static int esd331_open(struct net_device *dev)
 	memset(&priv->can.net_stats, 0, sizeof(priv->can.net_stats));
 #endif
 
-	for (i = 0; i < ESD331_MAX_CAN; i++) {
-		if (priv->board->dev[i] == NULL) {
-			break;
-		} else {
-			struct esd331_priv *otherPriv;
-			otherPriv = netdev_priv(priv->board->dev[i]);
-			if (otherPriv->can.state != CAN_STATE_STOPPED) {
-				enable_int = 0;
-				break;
-			}
-		}
-	}
+	if (esd331_all_nets_stopped(priv->board))
+		esd331_enable_irq(priv->board->conf_addr);
 
-	if (enable_int)
-		esd331_enableIRQ(priv->board->conf_addr);
-
-	priv->can.state = CAN_STATE_ACTIVE;
-	priv->can.restart_ms = 500;
+	priv->can.state = CAN_STATE_ERROR_ACTIVE;
 	netif_start_queue(dev);
 
 	return 0;
@@ -609,28 +655,13 @@ static int esd331_open(struct net_device *dev)
 static int esd331_close(struct net_device *dev)
 {
 	struct esd331_priv *priv = netdev_priv(dev);
-	int disable_int = 1;
-	int i;
 
 	priv->can.state = CAN_STATE_STOPPED;
 	netif_stop_queue(dev);
-	can_close_cleanup(dev);
+	close_candev(dev);
 
-	for (i = 0; i < ESD331_MAX_CAN; i++) {
-		if (priv->board->dev[i] == NULL) {
-			break;
-		} else {
-			struct esd331_priv *otherPriv;
-			otherPriv = netdev_priv(priv->board->dev[i]);
-			if (otherPriv->can.state != CAN_STATE_STOPPED) {
-				disable_int = 0;
-				break;
-			}
-		}
-	}
-
-	if (disable_int)
-		esd331_disableIRQ(priv->board->conf_addr);
+	if (esd331_all_nets_stopped(priv->board))
+		esd331_disable_irq(priv->board->conf_addr);
 
 	return 0;
 }
@@ -640,100 +671,51 @@ static int esd331_start_xmit(struct sk_buff *skb, struct net_device *dev)
 	struct esd331_priv *priv = netdev_priv(dev);
 	struct net_device_stats *stats = &dev->stats;
 	struct can_frame *cf = (struct can_frame *)skb->data;
-
-	if ((cf->can_id & CAN_EFF_FLAG) && (priv->board->eff_supp == 0)) {
-		stats->tx_errors++;
-		return 0;
-	}
-
-	netif_stop_queue(dev);
-
-	if (esd331_send(priv->board, priv->boardsNet, cf->can_id & 0x1FFFFFFF,
-						cf->can_id & CAN_EFF_FLAG,
-						cf->can_id & CAN_RTR_FLAG,
-						cf->can_dlc, cf->data)) {
-		stats->tx_fifo_errors++;
-		return 0;
-	}
-
-	stats->tx_bytes += cf->can_dlc;
-	dev->trans_start = jiffies;
+	int err;
 
 	can_put_echo_skb(skb, dev, 0);
 
-	return 0;
+	if ((cf->can_id & CAN_EFF_FLAG) && (priv->board->eff_supp == 0)) {
+		stats->tx_errors++;
+		stats->tx_dropped++;
+		can_free_echo_skb(dev, 0);
+		err = -EOPNOTSUPP;
+		goto out;
+	}
+
+	err = esd331_send(priv->board, priv->boards_net,
+				cf->can_id & CAN_EFF_MASK,
+				cf->can_id & CAN_EFF_FLAG,
+				cf->can_id & CAN_RTR_FLAG,
+				cf->can_dlc, cf->data);
+	if (err) {
+		stats->tx_fifo_errors++;
+		stats->tx_errors++;
+		stats->tx_dropped++;
+		can_free_echo_skb(dev, 0);
+		goto out;
+	}
+
+	netif_stop_queue(dev);
+	stats->tx_bytes += cf->can_dlc;
+	dev->trans_start = jiffies;
+out:
+	return err;
 }
 
 static int esd331_set_bittiming(struct net_device *dev)
 {
 	struct esd331_priv *priv = netdev_priv(dev);
-	int idx;
+	int i;
 
-	if (priv->can.bittiming.bitrate >= 1600000) {
-		priv->can.bittiming.bitrate = 1600000;
-		idx = 15;
-	} else if (priv->can.bittiming.bitrate >= 1000000) {
-		priv->can.bittiming.bitrate = 1000000;
-		idx = 0;
-	} else if (priv->can.bittiming.bitrate >= 800000) {
-		priv->can.bittiming.bitrate = 800000;
-		idx = 14;
-	} else if (priv->can.bittiming.bitrate >= 666000) {
-		priv->can.bittiming.bitrate = 666000;
-		idx = 1;
-	} else if (priv->can.bittiming.bitrate >= 500000) {
-		priv->can.bittiming.bitrate = 500000;
-		idx = 2;
-	} else if (priv->can.bittiming.bitrate >= 333000) {
-		priv->can.bittiming.bitrate = 333000;
-		idx = 3;
-	} else if (priv->can.bittiming.bitrate >= 250000) {
-		priv->can.bittiming.bitrate = 250000;
-		idx = 4;
-	} else if (priv->can.bittiming.bitrate >= 166000) {
-		priv->can.bittiming.bitrate = 166000;
-		idx = 5;
-	} else if (priv->can.bittiming.bitrate >= 125000) {
-		priv->can.bittiming.bitrate = 125000;
-		idx = 6;
-	} else if (priv->can.bittiming.bitrate >= 100000) {
-		priv->can.bittiming.bitrate = 100000;
-		idx = 7;
-	} else if (priv->can.bittiming.bitrate >= 83000) {
-		priv->can.bittiming.bitrate = 83000;
-		idx = 16;
-	} else if (priv->can.bittiming.bitrate >= 66000) {
-		priv->can.bittiming.bitrate = 66000;
-		idx = 8;
-	} else if (priv->can.bittiming.bitrate >= 50000) {
-		priv->can.bittiming.bitrate = 50000;
-		idx = 9;
-	} else if (priv->can.bittiming.bitrate >= 33000) {
-		priv->can.bittiming.bitrate = 33000;
-		idx = 10;
-	} else if (priv->can.bittiming.bitrate >= 20000) {
-		priv->can.bittiming.bitrate = 20000;
-		idx = 11;
-	} else if (priv->can.bittiming.bitrate >= 12500) {
-		priv->can.bittiming.bitrate = 12500;
-		idx = 12;
-	} else if (priv->can.bittiming.bitrate >= 10000) {
-		priv->can.bittiming.bitrate = 10000;
-		idx = 13;
-	} else
-		return -EINVAL;
+	for (i = 0; i < ARRAY_SIZE(esd331_baud_table); i++) {
+		if (priv->can.bittiming.bitrate == esd331_baud_table[i].rate) {
+			return esd331_write_baud(priv->boards_net,
+				esd331_baud_table[i].index, priv->board);
+		}
+	}
 
-	if (esd331_write_baud(priv->boardsNet, idx, priv->board))
-		return -EAGAIN;
-
-	return 0;
-}
-
-static int esd331_get_state(struct net_device *dev, enum can_state *state)
-{
-	struct esd331_priv *priv = netdev_priv(dev);
-	*state = priv->can.state;
-	return 0;
+	return -EINVAL;
 }
 
 static int esd331_set_mode(struct net_device *dev, enum can_mode mode)
@@ -742,7 +724,7 @@ static int esd331_set_mode(struct net_device *dev, enum can_mode mode)
 
 	switch (mode) {
 	case CAN_MODE_START:
-		priv->can.state = CAN_STATE_ACTIVE;
+		priv->can.state = CAN_STATE_ERROR_ACTIVE;
 		if (netif_queue_stopped(dev))
 			netif_wake_queue(dev);
 
@@ -755,9 +737,16 @@ static int esd331_set_mode(struct net_device *dev, enum can_mode mode)
 	return 0;
 }
 
+#if LINUX_VERSION_CODE > KERNEL_VERSION(2,6,28)
+static const struct net_device_ops esd331_netdev_ops = {
+	.ndo_open = esd331_open,
+	.ndo_stop = esd331_close,
+	.ndo_start_xmit = esd331_start_xmit,
+};
+#endif
+
 static struct net_device *__devinit esd331_pci_add_chan(struct pci_dev *pdev,
-					struct esd331_pci *board,
-					u8 boardsNet)
+		struct esd331_pci *board, u8 boards_net)
 {
 	struct net_device *dev;
 	struct esd331_priv *priv;
@@ -768,7 +757,7 @@ static struct net_device *__devinit esd331_pci_add_chan(struct pci_dev *pdev,
 		return ERR_PTR(-ENOMEM);
 
 	priv = netdev_priv(dev);
-	priv->boardsNet = boardsNet;
+	priv->boards_net = boards_net;
 	priv->board = board;
 
 	SET_NETDEV_DEV(dev, &pdev->dev);
@@ -782,12 +771,11 @@ static struct net_device *__devinit esd331_pci_add_chan(struct pci_dev *pdev,
 #endif
 
 	dev->irq = pdev->irq;
+	/* Set and enable PCI interrupts */
 	dev->flags |= IFF_ECHO;
 
 	priv->can.do_set_bittiming = esd331_set_bittiming;
-	priv->can.do_get_state = esd331_get_state;
 	priv->can.do_set_mode = esd331_set_mode;
-	priv->can.state = CAN_STATE_STOPPED;
 
 	err = register_candev(dev);
 	if (err) {
@@ -802,11 +790,12 @@ static struct net_device *__devinit esd331_pci_add_chan(struct pci_dev *pdev,
 }
 
 static int __devinit esd331_pci_init_one(struct pci_dev *pdev,
-						const struct pci_device_id *ent)
+		const struct pci_device_id *ent)
 {
 	struct esd331_pci *board;
 	int err;
 	int i;
+	int read_features = 0;
 
 	dev_info(&pdev->dev,
 			"Initializing device %04x:%04x %04x:%04x\n",
@@ -825,31 +814,36 @@ static int __devinit esd331_pci_init_one(struct pci_dev *pdev,
 	if (err)
 		goto failure;
 
-	board->conf_addr = pci_iomap(pdev, 0, 0x00001000);
+	board->conf_addr = pci_iomap(pdev, 0, 0);
 	if (board->conf_addr == NULL) {
 		err = -ENODEV;
 		goto failure_release_pci;
 	}
-	board->base_addr1 = pci_iomap(pdev, 2, 0x00100000);
+	board->base_addr1 = pci_iomap(pdev, 2, 0);
 	if (board->base_addr1 == NULL) {
 		err = -ENODEV;
 		goto failure_iounmap_conf;
 	}
-	board->base_addr2 = pci_iomap(pdev, 3, 0x00100000);
+	board->base_addr2 = pci_iomap(pdev, 3, 0);
 	if (board->base_addr2 == NULL) {
 		err = -ENODEV;
 		goto failure_iounmap_base1;
 	}
-	board->dpr = esd331_initPointer(board->base_addr1);
 
 	spin_lock_init(&board->irq_lock);
 
-	/* Features are read from board's messages after reset. Avoid */
-	/* that long reset time and set features by other means? */
-	esd331_reset(board->conf_addr);
+retry_features:
+	board->dpr = esd331_init_pointer(board->base_addr1);
+	err = esd331_read_features(board);
+	if (err) {
+		/* esd331_read_features() works only after board reset */
+		/* So if failed: reset board and retry: */
+		if (!read_features) {
+			read_features++;
+			esd331_reset(board->conf_addr, 1);
+			goto retry_features;
+		}
 
-	if (esd331_read_feat(board)) {
-		err = -EIO;
 		goto failure_iounmap_base2;
 	}
 
@@ -860,8 +854,8 @@ static int __devinit esd331_pci_init_one(struct pci_dev *pdev,
 			goto failure_iounmap_base2;
 		}
 		if (esd331_write_allid(i, board)) {
-			dev_err(&pdev->dev, "device %s failed to enable "
-					"all IDs\n", board->dev[i]->name);
+			dev_err(&pdev->dev, "device %s failed to enable all "
+						"IDs\n", board->dev[i]->name);
 		}
 	}
 
@@ -870,10 +864,10 @@ static int __devinit esd331_pci_init_one(struct pci_dev *pdev,
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,18)
 	err = request_irq(pdev->irq, &esd331_interrupt, SA_SHIRQ, "pci331",
-								(void *)board);
+			(void *)board);
 #else
 	err = request_irq(pdev->irq, &esd331_interrupt, IRQF_SHARED, "pci331",
-								(void *)board);
+			(void *)board);
 #endif
 	if (err) {
 		err = -EAGAIN;
@@ -905,7 +899,7 @@ static void __devexit esd331_pci_remove_one(struct pci_dev *pdev)
 	struct esd331_pci *board = pci_get_drvdata(pdev);
 	int i;
 
-	esd331_disableIRQ(board->conf_addr);
+	esd331_disable_irq(board->conf_addr);
 	free_irq(pdev->irq, (void *)board);
 
 	for (i = 0; i < ESD331_MAX_CAN; i++) {
@@ -915,6 +909,9 @@ static void __devexit esd331_pci_remove_one(struct pci_dev *pdev)
 		unregister_candev(board->dev[i]);
 		free_netdev(board->dev[i]);
 	}
+
+	esd331_reset(board->conf_addr, 0); /* 0 = No wait for restart here */
+	/* If module is reloaded too early, it will try a reset with waiting */
 
 	pci_iounmap(pdev, board->base_addr2);
 	pci_iounmap(pdev, board->base_addr1);
@@ -928,10 +925,10 @@ static void __devexit esd331_pci_remove_one(struct pci_dev *pdev)
 }
 
 static struct pci_driver esd331_pci_driver = {
-				.name = DRV_NAME,
-				.id_table = esd331_pci_tbl,
-				.probe = esd331_pci_init_one,
-				.remove = __devexit_p(esd331_pci_remove_one), };
+	.name = DRV_NAME,
+	.id_table = esd331_pci_tbl,
+	.probe = esd331_pci_init_one,
+	.remove = __devexit_p(esd331_pci_remove_one), };
 
 static int __init esd331_pci_init(void)
 {

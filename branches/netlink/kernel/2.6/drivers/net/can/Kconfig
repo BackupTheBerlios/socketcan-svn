@@ -113,17 +113,10 @@ config CAN_ESD_PCI
 	tristate "ESD PCI Cards"
 	depends on PCI && CAN_SJA1000
 	---help---
-	  This driver supports the esd PCI CAN cards CAN-PCI/200, 
-	  CAN-PCI/266, CAN-PMC/266 (PMC), CAN-CPCI/200 (CompactPCI), 
-	  CAN-PCIe2000 (PCI Express) and CAN-PCI104/200 (PCI104) 
+	  This driver supports the esd PCI CAN cards CAN-PCI/200,
+	  CAN-PCI/266, CAN-PMC/266 (PMC), CAN-CPCI/200 (CompactPCI),
+	  CAN-PCIe2000 (PCI Express) and CAN-PCI104/200 (PCI104)
 	  from the esd electronic system design gmbh (http://www.esd.eu).
-
-config CAN_ESD_PCI331
-	tristate "ESD CAN 331 Cards"
-	depends on PCI && CAN_SJA1000
-	---help---
-	  This driver supports the PCI/331, CPCI/331 and PMC/331 CAN cards
-	  from the esd system design gmbh (http://www.esd.eu).
 
 config CAN_IXXAT_PCI
 	tristate "IXXAT PCI Card"
@@ -152,6 +145,13 @@ config CAN_KVASER_PCI
 	---help---
 	  This driver is for the the PCIcanx and PCIcan cards (1, 2 or
 	  4 channel) from Kvaser (http://www.kvaser.com).
+
+config CAN_ESD_PCI331
+	tristate "ESD CAN 331 Cards"
+	depends on PCI && CAN_DEV
+	---help---
+	  This driver supports the PCI/331, CPCI/331 and PMC/331 CAN cards
+	  from the esd system design gmbh (http://www.esd.eu).
 
 config CAN_SOFTING
 	tristate "Softing Gmbh CAN generic support"
