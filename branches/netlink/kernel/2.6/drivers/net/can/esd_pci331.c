@@ -29,6 +29,7 @@
 #include <linux/if_arp.h>
 #include <linux/skbuff.h>
 #include <linux/types.h>
+#include <linux/delay.h>
 #include <linux/errno.h>
 #include <linux/init.h>
 #include <linux/io.h>
@@ -47,8 +48,14 @@ MODULE_DESCRIPTION("Socket-CAN driver for the esd 331 CAN cards");
 MODULE_DEVICE_TABLE(pci, esd331_pci_tbl);
 MODULE_SUPPORTED_DEVICE("esd CAN-PCI/331, CAN-CPCI/331, CAN-PMC/331");
 
+#ifndef PCI_DEVICE_ID_PLX_9030
+# define PCI_DEVICE_ID_PLX_9030	0x9030
+#endif
 #ifndef PCI_DEVICE_ID_PLX_9050
-# define PCI_DEVICE_ID_PLX_9050 0x9050
+# define PCI_DEVICE_ID_PLX_9050	0x9050
+#endif
+#ifndef PCI_VENDOR_ID_ESDGMBH
+#define PCI_VENDOR_ID_ESDGMBH   0x12fe
 #endif
 
 #define ESD_PCI_SUB_SYS_ID_PCI331 0x0001
@@ -434,7 +441,11 @@ static int esd331_create_err_frame(struct net_device *dev, canid_t idflags,
 	if (unlikely(skb == NULL))
 		return -ENOMEM;
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,23)
+	stats = can_get_stats(dev);
+#else
 	stats = &dev->stats;
+#endif
 
 	skb->dev = dev;
 	skb->protocol = htons(ETH_P_CAN);
@@ -457,7 +468,11 @@ static int esd331_create_err_frame(struct net_device *dev, canid_t idflags,
 static void esd331_irq_rx(struct net_device *dev, struct esd331_can_msg *msg,
 				int eff)
 {
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,23)
+	struct net_device_stats *stats = can_get_stats(dev);
+#else
 	struct net_device_stats *stats = &dev->stats;
+#endif
 	struct can_frame *cfrm;
 	struct sk_buff *skb;
 	int i;
@@ -543,6 +558,7 @@ static void esd331_handle_errmsg(struct net_device *dev,
 
 static void esd331_handle_messages(struct esd331_pci *board)
 {
+	struct net_device *dev;
 	struct esd331_priv *priv;
 	struct net_device_stats *stats;
 	struct esd331_can_msg msg;
@@ -553,37 +569,41 @@ static void esd331_handle_messages(struct esd331_pci *board)
 				|| (board->dev[msg.net] == NULL)))
 			continue;
 
-		priv = netdev_priv(board->dev[msg.net]);
+		dev = board->dev[msg.net];
+		priv = netdev_priv(dev);
 		if (priv->can.state == CAN_STATE_STOPPED)
 			continue;
 
-		stats = &board->dev[msg.net]->stats;
-
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,23)
+		stats = can_get_stats(dev);
+#else
+		stats = &dev->stats;
+#endif
 		switch (msg.cmmd) {
 
 		case ESD331_I20_BCAN:
 		case ESD331_I20_EX_BCAN:
-			esd331_irq_rx(board->dev[msg.net], &msg,
+			esd331_irq_rx(dev, &msg,
 					(msg.cmmd == ESD331_I20_EX_BCAN));
 			break;
 
 		case ESD331_I20_TXDONE:
 		case ESD331_I20_EX_TXDONE:
 			stats->tx_packets++;
-			can_get_echo_skb(board->dev[msg.net], 0);
-			netif_wake_queue(board->dev[msg.net]);
+			can_get_echo_skb(dev, 0);
+			netif_wake_queue(dev);
 			break;
 
 		case ESD331_I20_TXTOUT:
 		case ESD331_I20_EX_TXTOUT:
 			stats->tx_errors++;
 			stats->tx_dropped++;
-			can_free_echo_skb(board->dev[msg.net], 0);
-			netif_wake_queue(board->dev[msg.net]);
+			can_free_echo_skb(dev, 0);
+			netif_wake_queue(dev);
 			break;
 
 		case ESD331_I20_ERROR:
-			esd331_handle_errmsg(board->dev[msg.net], &msg);
+			esd331_handle_errmsg(dev, &msg);
 			break;
 
 		default:
@@ -669,7 +689,11 @@ static int esd331_close(struct net_device *dev)
 static int esd331_start_xmit(struct sk_buff *skb, struct net_device *dev)
 {
 	struct esd331_priv *priv = netdev_priv(dev);
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,23)
+	struct net_device_stats *stats = can_get_stats(dev);
+#else
 	struct net_device_stats *stats = &dev->stats;
+#endif
 	struct can_frame *cf = (struct can_frame *)skb->data;
 	int err;
 
