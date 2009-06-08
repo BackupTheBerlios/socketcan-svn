@@ -26,12 +26,18 @@
 #include <linux/if_arp.h>
 #include <socketcan/can.h>
 #include <socketcan/can/dev.h>
-#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,24) || defined(CONFIG_CAN_DEV_SYSFS)
-#define USE_CAN_DEV_SYSFS
-#include "sysfs.h"
-#else
+
+#ifndef CONFIG_CAN_DEV_SYSFS
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,24)
+#error "CAN netlink interface not support by this kernel version"
+#endif
 #include <socketcan/can/netlink.h>
 #include <net/rtnetlink.h>
+#else
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,21)
+#error "CAN sysfs interface not support by this kernel version"
+#endif
+#include "sysfs.h"
 #endif
 
 #define MOD_DESC "CAN device driver interface"
@@ -157,7 +163,7 @@ static int can_calc_bittiming(struct net_device *dev, struct can_bittiming *bt)
 	bt->phase_seg2 = tseg2;
 	bt->sjw = 1;
 	bt->brp = best_brp;
-#ifndef USE_CAN_DEV_SYSFS
+#ifndef CONFIG_CAN_DEV_SYSFS
 	/* real bit-rate */
 	bt->bitrate = priv->clock.freq / (bt->brp * (tseg1 + tseg2 + 1));
 	/* real sample point */
@@ -174,7 +180,7 @@ static int can_calc_bittiming(struct net_device *dev, struct can_bittiming *bt)
 #endif /* CONFIG_CAN_CALC_BITTIMING */
 
 
-#ifdef USE_CAN_DEV_SYSFS
+#ifdef CONFIG_CAN_DEV_SYSFS
 int can_sample_point(struct can_bittiming *bt)
 {
 	return ((bt->prop_seg + bt->phase_seg1 + 1) * 1000) /
@@ -533,7 +539,7 @@ static inline void setup_timer(struct timer_list * timer,
 int open_candev(struct net_device *dev)
 {
 	struct can_priv *priv = netdev_priv(dev);
-#ifdef USE_CAN_DEV_SYSFS
+#ifdef CONFIG_CAN_DEV_SYSFS
 	int err;
 #endif
 
@@ -542,7 +548,7 @@ int open_candev(struct net_device *dev)
 		return -EINVAL;
 	}
 
-#ifdef USE_CAN_DEV_SYSFS
+#ifdef CONFIG_CAN_DEV_SYSFS
 	err = can_get_bittiming(dev, &priv->bittiming);
 	if (err)
 		return err;
@@ -577,7 +583,7 @@ void close_candev(struct net_device *dev)
 }
 EXPORT_SYMBOL_GPL(close_candev);
 
-#ifndef USE_CAN_DEV_SYSFS
+#ifndef CONFIG_CAN_DEV_SYSFS
 /*
  * CAN netlink interface
  */
@@ -700,14 +706,14 @@ static struct rtnl_link_ops can_link_ops __read_mostly = {
 	.fill_xstats	= can_fill_xstats,
 };
 
-#endif /* !USE_CAN_DEV_SYSFS */
+#endif /* !CONFIG_CAN_DEV_SYSFS */
 
 /*
  * Register the CAN network device
  */
 int register_candev(struct net_device *dev)
 {
-#ifdef USE_CAN_DEV_SYSFS
+#ifdef CONFIG_CAN_DEV_SYSFS
 	int err;
 
 	err = register_netdev(dev);
@@ -727,7 +733,7 @@ EXPORT_SYMBOL_GPL(register_candev);
  */
 void unregister_candev(struct net_device *dev)
 {
-#ifdef USE_CAN_DEV_SYSFS
+#ifdef CONFIG_CAN_DEV_SYSFS
 	can_remove_sysfs(dev);
 #endif
 	unregister_netdev(dev);
@@ -736,7 +742,7 @@ EXPORT_SYMBOL_GPL(unregister_candev);
 
 static __init int can_dev_init(void)
 {
-#ifndef USE_CAN_DEV_SYSFS
+#ifndef CONFIG_CAN_DEV_SYSFS
 	int err;
 
 	err = rtnl_link_register(&can_link_ops);
@@ -754,12 +760,12 @@ module_init(can_dev_init);
 
 static __exit void can_dev_exit(void)
 {
-#ifndef USE_CAN_DEV_SYSFS
+#ifndef CONFIG_CAN_DEV_SYSFS
 	rtnl_link_unregister(&can_link_ops);
 #endif
 }
 module_exit(can_dev_exit);
 
-#ifndef USE_CAN_DEV_SYSFS
+#ifndef CONFIG_CAN_DEV_SYSFS
 MODULE_ALIAS_RTNL_LINK("can");
 #endif
