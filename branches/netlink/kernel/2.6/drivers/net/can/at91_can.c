@@ -611,11 +611,11 @@ static void at91_irq_err(struct net_device *dev, u32 reg_sr_masked)
 	if (unlikely(reg_sr & AT91_IRQ_BOFF))
 		new_state = CAN_STATE_BUS_OFF;
 	else if (unlikely(reg_sr & AT91_IRQ_ERRP))
-		new_state = CAN_STATE_BUS_PASSIVE;
+		new_state = CAN_STATE_ERROR_PASSIVE;
 	else if (unlikely(reg_sr & AT91_IRQ_WARN))
-		new_state = CAN_STATE_BUS_WARNING;
+		new_state = CAN_STATE_ERROR_WARNING;
 	else if (likely(reg_sr & AT91_IRQ_ERRA))
-		new_state = CAN_STATE_ACTIVE;
+		new_state = CAN_STATE_ERROR_ACTIVE;
 	else {
 		BUG();	/* FIXME */
 		return;
@@ -628,22 +628,22 @@ static void at91_irq_err(struct net_device *dev, u32 reg_sr_masked)
 
 
 	switch (priv->can.state) {
-	case CAN_STATE_ACTIVE:
+	case CAN_STATE_ERROR_ACTIVE:
 		/*
 		 * from: ACTIVE
 		 * to  : BUS_WARNING, BUS_PASSIVE, BUS_OFF
 		 * =>  : there was a warning int
 		 */
-		if (new_state >= CAN_STATE_BUS_WARNING &&
+		if (new_state >= CAN_STATE_ERROR_WARNING &&
 		    new_state <= CAN_STATE_BUS_OFF)
 			priv->can.can_stats.error_warning++;
-	case CAN_STATE_BUS_WARNING:	/* fallthrough */
+	case CAN_STATE_ERROR_WARNING:	/* fallthrough */
 		/*
 		 * from: ACTIVE, BUS_WARNING
 		 * to  : BUS_PASSIVE, BUS_OFF
 		 * =>  : error passive int
 		 */
-		if (new_state >= CAN_STATE_BUS_PASSIVE &&
+		if (new_state >= CAN_STATE_ERROR_PASSIVE &&
 		    new_state <= CAN_STATE_BUS_OFF)
 			priv->can.can_stats.error_passive++;
 		break;
@@ -654,7 +654,7 @@ static void at91_irq_err(struct net_device *dev, u32 reg_sr_masked)
 		 * success it leaves bus off. so we have to reenable
 		 * the carrier.
 		 */
-		if (new_state <= CAN_STATE_BUS_PASSIVE)
+		if (new_state <= CAN_STATE_ERROR_PASSIVE)
 			netif_carrier_on(dev);
 		break;
 	default:
@@ -664,18 +664,18 @@ static void at91_irq_err(struct net_device *dev, u32 reg_sr_masked)
 
 	/* process state changes depending on the new state */
 	switch (new_state) {
-	case CAN_STATE_ACTIVE:
+	case CAN_STATE_ERROR_ACTIVE:
 		/*
 		 * actually we want to enable AT91_IRQ_WARN here, but
 		 * it screws up the system under certain
 		 * circumstances. so just enable AT91_IRQ_ERRP, thus
 		 * the "fallthrough"
 		 */
-	case CAN_STATE_BUS_WARNING:	/* fallthrough */
+	case CAN_STATE_ERROR_WARNING:	/* fallthrough */
 		reg_idr = AT91_IRQ_ERRA | AT91_IRQ_WARN | AT91_IRQ_BOFF;
 		reg_ier = AT91_IRQ_ERRP;
 		break;
-	case CAN_STATE_BUS_PASSIVE:
+	case CAN_STATE_ERROR_PASSIVE:
 		reg_idr = AT91_IRQ_ERRA | AT91_IRQ_WARN | AT91_IRQ_ERRP;
 		reg_ier = AT91_IRQ_BOFF;
 		break;
@@ -730,11 +730,11 @@ static void at91_irq_err(struct net_device *dev, u32 reg_sr_masked)
 		cf->can_dlc = CAN_ERR_DLC;
 
 		switch (new_state) {
-		case CAN_STATE_BUS_WARNING:
-		case CAN_STATE_BUS_PASSIVE:
+		case CAN_STATE_ERROR_WARNING:
+		case CAN_STATE_ERROR_PASSIVE:
 			cf->can_id |= CAN_ERR_CRTL;
 
-			if (new_state == CAN_STATE_BUS_WARNING)
+			if (new_state == CAN_STATE_ERROR_WARNING)
 				cf->data[1] = (tec > rec) ?
 					CAN_ERR_CRTL_TX_WARNING :
 					CAN_ERR_CRTL_RX_WARNING;
@@ -881,7 +881,7 @@ static int at91_set_bittiming(struct net_device *dev)
 		((bt->phase_seg2 - 1) <<  0);
 
 	dev_dbg(ND2D(dev), "writing AT91_BR: 0x%08x, can_sys_clock: %d\n",
-		  reg_br, priv->can.bittiming.clock);
+		  reg_br, priv->can.clock.freq);
 	at91_write(dev, AT91_BR, reg_br);
 
 	return 0;
@@ -909,7 +909,7 @@ static void at91_chip_start(struct net_device *dev)
 	reg_mr = at91_read(dev, AT91_MR);
 	at91_write(dev, AT91_MR, reg_mr | AT91_MR_AT91EN);
 
-	priv->can.state = CAN_STATE_ACTIVE;
+	priv->can.state = CAN_STATE_ERROR_ACTIVE;
 
 	/* Enable interrupts */
 	reg_ier =
