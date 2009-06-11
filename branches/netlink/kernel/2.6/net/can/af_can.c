@@ -930,7 +930,11 @@ static int can_notifier(struct notifier_block *nb, unsigned long msg,
  */
 
 static struct packet_type can_packet __read_mostly = {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,30)
+	.type = cpu_to_be16(ETH_P_CAN),
+#else
 	.type = __constant_htons(ETH_P_CAN),
+#endif
 	.dev  = NULL,
 	.func = can_rcv,
 };
