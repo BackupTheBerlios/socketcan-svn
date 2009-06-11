@@ -122,6 +122,10 @@ static irqreturn_t ems_pcmcia_interrupt(int irq, void *dev_id)
 	irqreturn_t retval = IRQ_NONE;
 	int i, again;
 
+	/* Card not present */
+	if (readw(card->base_addr) != 0xAA55)
+		return IRQ_HANDLED;
+
 	do {
 		again = 0;
 
