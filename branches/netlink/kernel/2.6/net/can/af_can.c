@@ -1011,6 +1011,10 @@ static __exit void can_exit(void)
 	}
 	spin_unlock(&can_rcvlists_lock);
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,15)
+	rcu_barrier(); /* Wait for completion of call_rcu()'s */
+#endif
+
 	kmem_cache_destroy(rcv_cache);
 }
 
