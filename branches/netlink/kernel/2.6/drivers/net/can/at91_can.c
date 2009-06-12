@@ -153,6 +153,7 @@ struct at91_priv {
 	unsigned int		tx_echo;
 
 	unsigned int		rx_bank;
+	void __iomem		*reg_base; /* ioremap'ed address to registers */
 };
 
 
@@ -186,13 +187,15 @@ static inline int get_tx_echo_mb(struct at91_priv *priv)
 
 static inline u32 at91_read(struct net_device *dev, enum at91_reg reg)
 {
-	return readl((void __iomem *)dev->base_addr + reg);
+	struct at91_priv *priv = netdev_priv(dev);
+	return readl(priv->reg_base + reg);
 }
 
 static inline void
 at91_write(struct net_device *dev, enum at91_reg reg, u32 value)
 {
-	writel(value, (void __iomem *)dev->base_addr + reg);
+	struct at91_priv *priv = netdev_priv(dev);
+	writel(value, priv->reg_base + reg);
 }
 
 
@@ -486,13 +489,6 @@ static void at91_irq_rx(struct net_device *dev, u32 reg_sr)
 		priv->rx_bank = 0;
 		break;
 	}
-}
-
-
-static void at91_tx_timeout(struct net_device *dev)
-{
-	dev->stats.tx_errors++;
-	dev_dbg(ND2D(dev), "TX timeout!\n");
 }
 
 
@@ -991,14 +987,6 @@ static int at91_close(struct net_device *dev)
 }
 
 
-static int at91_get_state(const struct net_device *dev, u32 *state)
-{
-	struct at91_priv *priv = netdev_priv(dev);
-	*state = priv->can.state;
-	return 0;
-}
-
-
 static int at91_set_mode(struct net_device *dev, u32 _mode)
 {
 	enum can_mode mode = _mode;
@@ -1024,7 +1012,6 @@ static const struct net_device_ops at91_netdev_ops = {
 	.ndo_open	= at91_open,
 	.ndo_stop	= at91_close,
 	.ndo_start_xmit	= at91_start_xmit,
-	.ndo_tx_timeout	= at91_tx_timeout,
 };
 #endif
 
@@ -1076,20 +1063,18 @@ static int __init at91_can_probe(struct platform_device *pdev)
 	dev->open		= at91_open;
 	dev->stop		= at91_close;
 	dev->hard_start_xmit	= at91_start_xmit;
-	dev->tx_timeout		= at91_tx_timeout;
 #endif
 	dev->get_stats		= at91_get_stats;
 	dev->irq		= irq;
-	dev->base_addr		= (unsigned long)addr;
 	dev->flags		|= IFF_ECHO;
 
 	priv = netdev_priv(dev);
 	priv->can.clock.freq		= clk_get_rate(clk);
 	priv->can.bittiming_const	= &at91_bittiming_const;
 	priv->can.do_set_bittiming	= at91_set_bittiming;
-	priv->can.do_get_state		= at91_get_state;
 	priv->can.do_set_mode		= at91_set_mode;
 	priv->clk			= clk;
+	priv->reg_base			= addr;
 
 	priv->pdata		= pdev->dev.platform_data;
 
@@ -1103,8 +1088,8 @@ static int __init at91_can_probe(struct platform_device *pdev)
 	}
 
 
-	dev_info(&pdev->dev, "device registered (base_addr=%#lx, irq=%d)\n",
-		 dev->base_addr, dev->irq);
+	dev_info(&pdev->dev, "device registered (reg_base=%#p, irq=%d)\n",
+		 priv->reg_base, dev->irq);
 
 	return 0;
 
@@ -1133,7 +1118,7 @@ static int __devexit at91_can_remove(struct platform_device *pdev)
 
 	free_netdev(dev);
 
-	iounmap((void __iomem *)dev->base_addr);
+	iounmap(priv->reg_base);
 
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	release_mem_region(res->start, res->end - res->start + 1);
