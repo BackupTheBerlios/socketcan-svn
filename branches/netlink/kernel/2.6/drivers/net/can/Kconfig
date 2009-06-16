@@ -109,6 +109,13 @@ config CAN_EMS_PCMCIA
 	  This driver is for the one or two channel CPC-CARD cards from
 	  EMS Dr. Thomas Wuensche (http://www.ems-wuensche.de).
 
+config CAN_EMS_104M
+	tristate "EMS CPC-104M"
+	depends on ISA && CAN_SJA1000
+	---help---
+	  This driver is for the one, two or four channel CPC-104M cards
+	  from EMS Dr. Thomas Wuensche (http://www.ems-wuensche.de).
+
 config CAN_ESD_PCI
 	tristate "ESD PCI Cards"
 	depends on PCI && CAN_SJA1000
