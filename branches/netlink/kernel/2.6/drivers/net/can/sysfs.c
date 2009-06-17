@@ -451,7 +451,7 @@ static ssize_t can_stat_show(const struct device *d,
 	read_lock(&dev_base_lock);
 	if (dev_isalive(dev))
 		ret = sprintf(buf, "%ld\n",
-			      *(unsigned long *)(((u8 *)stats) + offset));
+			      *(u32 *)(((u8 *)stats) + offset));
 
 	read_unlock(&dev_base_lock);
 	return ret;
