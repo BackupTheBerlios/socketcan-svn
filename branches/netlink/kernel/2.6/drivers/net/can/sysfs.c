@@ -138,6 +138,8 @@ static int change_can_ctrlmode(struct net_device *dev, unsigned long ctrlmode)
 	if (priv->state != CAN_STATE_STOPPED)
 		return -EBUSY;
 
+	priv->ctrlmode = ctrlmode;
+
 	return 0;
 }
 
