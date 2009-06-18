@@ -362,7 +362,7 @@ static int __devinit ems_pcmcia_probe(struct pcmcia_device *dev)
 /*
  * Configure PCMCIA socket
  */
-static void ems_pcmcia_config(struct pcmcia_device *dev)
+static void __devinit ems_pcmcia_config(struct pcmcia_device *dev)
 {
 	win_req_t req;
 	memreq_t mem;

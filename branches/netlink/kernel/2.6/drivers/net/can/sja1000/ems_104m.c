@@ -63,6 +63,7 @@ struct ems_104m_card {
 	struct net_device *net_dev[EMS_104M_MAX_CHAN];
 
 	void __iomem *base;
+	int irq;
 };
 
 #define EMS_104M_CAN_CLOCK (16000000 / 2)
@@ -192,6 +193,7 @@ static int __devinit ems_104m_probe(struct device *pdev, unsigned int idx)
 	dev_set_drvdata(pdev, card);
 
 	card->channels = 0;
+	card->irq = irq[idx];
 
 	card->base = ioremap_nocache(mem[idx], EMS_104M_MEM_SIZE);
 	if (card->base == NULL) {
@@ -282,10 +284,10 @@ static int __devinit ems_104m_probe(struct device *pdev, unsigned int idx)
 	}
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,18)
-	err = request_irq(irq[idx], &ems_104m_interrupt, SA_SHIRQ,
+	err = request_irq(card->irq, &ems_104m_interrupt, SA_SHIRQ,
 		DRV_NAME, (void *)card);
 #else
-	err = request_irq(irq[idx], &ems_104m_interrupt, IRQF_SHARED,
+	err = request_irq(card->irq, &ems_104m_interrupt, IRQF_SHARED,
 		DRV_NAME, (void *)card);
 #endif
 
@@ -319,7 +321,7 @@ static int __devexit ems_104m_remove(struct device *pdev, unsigned int idx)
 	if (!card)
 		return 0;
 
-	free_irq(irq[idx], card);
+	free_irq(card->irq, card);
 
 	for (i = 0; i < card->channels; i++) {
 		dev = card->net_dev[i];
