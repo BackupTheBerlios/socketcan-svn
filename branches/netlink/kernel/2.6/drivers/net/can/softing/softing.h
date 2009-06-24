@@ -101,7 +101,7 @@ struct softing {
 		unsigned short manf;
 		unsigned short prod;
 		u32  serial, fw, hw, lic;
-		u16  chip [2];
+		u16  chip[2];
 		u32  freq;
 		const char *name;
 	} id;
@@ -160,6 +160,13 @@ extern void softing_flush_echo_skb(struct softing_priv *priv);
 
 /* reinitaliase the card, apply -1 for bus[01] for 'no change' */
 extern int softing_reinit(struct softing *card, int bus0, int bus1);
+
+/* create/remove the per-card associated sysfs entries */
+extern int softing_card_sysfs_create(struct softing *card);
+extern void softing_card_sysfs_remove(struct softing *card);
+/* create/remove the per-bus associated sysfs entries */
+extern int softing_bus_sysfs_create(struct softing_priv *bus);
+extern void softing_bus_sysfs_remove(struct softing_priv *bus);
 
 /* SOFTING DPRAM mappings */
 struct softing_rx {
@@ -243,26 +250,4 @@ struct softing_info {
 
 /* debug */
 extern int softing_debug;
-
-#define mod_alert(fmt,arg...) { \
-	if (softing_debug >= 0) \
-		printk(KERN_ALERT "[%s] %s:" fmt "\n" \
-			, THIS_MODULE->name \
-			, __func__ \
-			, ##arg); \
-	}
-#define mod_info(fmt,arg...) { \
-	if (softing_debug >= 1) \
-		printk(KERN_INFO	"[%s] %s:" fmt "\n"\
-			, THIS_MODULE->name \
-			, __func__ \
-			, ##arg); \
-	}
-#define mod_trace(fmt,arg...) { \
-	if (softing_debug >= 2) \
-		printk(KERN_DEBUG "[%s] %s:" fmt "\n" \
-			, THIS_MODULE->name \
-			, __func__ \
-			, ##arg); \
-	}
 
