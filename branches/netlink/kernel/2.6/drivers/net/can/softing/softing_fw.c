@@ -737,7 +737,7 @@ ktime_t softing_raw2ktime(struct softing *card, u32 raw)
 	uint64_t expected;
 	ktime_t now;
 	ktime_t target;
-	ovf = 0x100000000;
+	ovf = 0x100000000ULL;
 	rawl = raw;
 	/*TODO : don't loose higher order bits in computation */
 	switch (card->desc->freq) {

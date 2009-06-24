@@ -545,7 +545,7 @@ static int boot_card(struct softing *card)
 			continue;
 		/* memory is not equal */
 		dev_alert(card->dev, "write to dpram failed at 0x%04lx\n",
-			lp - card->dpram.virt);
+			(unsigned long)(lp - card->dpram.virt));
 		goto open_failed;
 	}
 	wmb();
