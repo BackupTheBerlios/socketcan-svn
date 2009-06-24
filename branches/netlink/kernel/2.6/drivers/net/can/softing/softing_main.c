@@ -33,26 +33,22 @@
 #error This driver does not support Kernel versions < 2.6.23
 #endif
 
-/* this is the worst thing on the softing API
- * 2 busses are driven together, I don't know how
- * to recover a single of them.
- * Therefore, when one bus is modified, the other
- * is flushed too
+/*
+ * test is a specific CAN netdev
+ * is online (ie. up 'n running, not sleeping, not busoff
  */
-void softing_flush_echo_skb(struct softing_priv *priv)
+static inline int canif_is_active(struct net_device *netdev)
 {
-	close_candev(priv->netdev);
-	priv->tx.pending = 0;
-	priv->tx.echo_put = 0;
-	priv->tx.echo_get = 0;
+	struct can_priv *can = netdev_priv(netdev);
+	if (!netif_running(netdev))
+		return 0;
+	return (can->state <= CAN_STATE_ERROR_PASSIVE);
 }
 
-/*softing_unlocked_tx_run:*/
-/*trigger the tx queue-ing*/
-/*no locks are grabbed, so be sure to have the spin spinlock*/
+/* trigger the tx queue-ing */
 static int netdev_start_xmit(struct sk_buff *skb, struct net_device *dev)
 {
-	struct softing_priv *priv = (struct softing_priv *)netdev_priv(dev);
+	struct softing_priv *priv = netdev_priv(dev);
 	struct softing *card = priv->card;
 	int ret;
 	int bhlock;
@@ -61,7 +57,6 @@ static int netdev_start_xmit(struct sk_buff *skb, struct net_device *dev)
 	unsigned int fifo_wr;
 	struct can_frame msg;
 
-	ret = -ENOTTY;
 	if (in_interrupt()) {
 		bhlock = 0;
 		spin_lock(&card->spin);
@@ -69,28 +64,17 @@ static int netdev_start_xmit(struct sk_buff *skb, struct net_device *dev)
 		bhlock = 1;
 		spin_lock_bh(&card->spin);
 	}
-	if (!card->fw.up) {
-		ret = -EIO;
+	ret = NETDEV_TX_BUSY;
+	if (!card->fw.up)
 		goto xmit_done;
-	}
-	if (netif_carrier_ok(priv->netdev) <= 0) {
-		ret = -EBADF;
+	if (card->tx.pending >= TXMAX)
 		goto xmit_done;
-	}
-	if (card->tx.pending >= TXMAX) {
-		ret = -EBUSY;
+	if (priv->tx.pending >= CAN_ECHO_SKB_MAX)
 		goto xmit_done;
-	}
-	if (priv->tx.pending >= CAN_ECHO_SKB_MAX) {
-		ret = -EBUSY;
-		goto xmit_done;
-	}
 	fifo_wr = card->dpram.tx->wr;
-	if (fifo_wr == card->dpram.tx->rd) {
+	if (fifo_wr == card->dpram.tx->rd)
 		/*fifo full */
-		ret = -EAGAIN;
 		goto xmit_done;
-	}
 	memcpy(&msg, skb->data, sizeof(msg));
 	ptr = &card->dpram.tx->fifo[fifo_wr][0];
 	cmd = CMD_TX;
@@ -118,15 +102,15 @@ static int netdev_start_xmit(struct sk_buff *skb, struct net_device *dev)
 		 sizeof(card->dpram.tx->fifo[0]))
 		fifo_wr = 0;
 	card->dpram.tx->wr = fifo_wr;
-	ret = 0;
+	card->tx.last_bus = priv->index;
 	++card->tx.pending;
 	++priv->tx.pending;
 	can_put_echo_skb(skb, dev, priv->tx.echo_put);
 	++priv->tx.echo_put;
 	if (priv->tx.echo_put >= CAN_ECHO_SKB_MAX)
 		priv->tx.echo_put = 0;
-	/* clear pointer, so don't erase later */
-	skb = 0;
+	/* can_put_echo_skb() saves the skb, safe to return TX_OK */
+	ret = NETDEV_TX_OK;
 xmit_done:
 	if (bhlock)
 		spin_unlock_bh(&card->spin);
@@ -142,10 +126,36 @@ xmit_done:
 			netif_stop_queue(bus->netdev);
 		}
 	}
+	if (ret != NETDEV_TX_OK)
+		netif_stop_queue(dev);
 
-	/* free skb, if not handled by the driver */
-	if (skb)
-		dev_kfree_skb(skb);
+	return ret;
+}
+
+int softing_rx(struct net_device *netdev, const struct can_frame *msg,
+	ktime_t ktime)
+{
+	struct sk_buff *skb;
+	int ret;
+	struct net_device_stats *stats;
+
+	skb = dev_alloc_skb(sizeof(msg));
+	if (!skb)
+		return -ENOMEM;
+	skb->dev = netdev;
+	skb->protocol = htons(ETH_P_CAN);
+	skb->ip_summed = CHECKSUM_UNNECESSARY;
+	memcpy(skb_put(skb, sizeof(*msg)), msg, sizeof(*msg));
+	skb->tstamp = ktime;
+	ret = netif_rx(skb);
+	if (ret == NET_RX_DROP) {
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,23)
+		stats = can_get_stats(netdev);
+#else
+		stats = &netdev->stats;
+#endif
+		++stats->rx_dropped;
+	}
 	return ret;
 }
 
@@ -153,12 +163,15 @@ static int softing_dev_svc_once(struct softing *card)
 {
 	int j;
 	struct softing_priv *bus;
-	struct sk_buff *skb;
+	ktime_t ktime;
 	struct can_frame msg;
 
 	unsigned int fifo_rd;
 	unsigned int cnt = 0;
 	struct net_device_stats *stats;
+	u8 *ptr;
+	u32 tmp;
+	u8 cmd;
 
 	memset(&msg, 0, sizeof(msg));
 	if (card->dpram.rx->lost_msg) {
@@ -168,12 +181,16 @@ static int softing_dev_svc_once(struct softing *card)
 		msg.can_id = CAN_ERR_FLAG | CAN_ERR_CRTL;
 		msg.can_dlc = CAN_ERR_DLC;
 		msg.data[1] = CAN_ERR_CRTL_RX_OVERFLOW;
-		/*service to both busses, we don't know which one generated */
+		/*
+		 * service to all busses, we don't know which it was applicable
+		 * but only service busses that are online
+		 */
 		for (j = 0; j < card->nbus; ++j) {
 			bus = card->bus[j];
 			if (!bus)
 				continue;
-			if (!netif_carrier_ok(bus->netdev))
+			if (!canif_is_active(bus->netdev))
+				/* a dead bus has no overflows */
 				continue;
 #if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,23)
 			stats = can_get_stats(bus->netdev);
@@ -181,176 +198,143 @@ static int softing_dev_svc_once(struct softing *card)
 			stats = &bus->netdev->stats;
 #endif
 			++stats->rx_over_errors;
-			skb = dev_alloc_skb(sizeof(msg));
-			if (!skb)
-				return -ENOMEM;
-			skb->dev = bus->netdev;
-			skb->protocol = htons(ETH_P_CAN);
-			skb->ip_summed = CHECKSUM_UNNECESSARY;
-			memcpy(skb_put(skb, sizeof(msg)), &msg, sizeof(msg));
-			if (netif_rx(skb))
-				dev_kfree_skb_irq(skb);
+			softing_rx(bus->netdev, &msg, ktime_set(0, 0));
 		}
+		/* prepare for other use */
 		memset(&msg, 0, sizeof(msg));
 		++cnt;
 	}
 
 	fifo_rd = card->dpram.rx->rd;
-	if (++fifo_rd >=
-		 sizeof(card->dpram.rx->fifo) / sizeof(card->dpram.rx->fifo[0]))
+	if (++fifo_rd >= ARRAY_SIZE(card->dpram.rx->fifo))
 		fifo_rd = 0;
-	if (card->dpram.rx->wr != fifo_rd) {
-		u8 *ptr;
-		u32 tmp;
-		u8 cmd;
-		int do_skb;
 
-		ptr = &card->dpram.rx->fifo[fifo_rd][0];
+	if (card->dpram.rx->wr == fifo_rd)
+		return cnt;
 
-		cmd = *ptr++;
-		if (cmd == 0xff) {
-			/*not quite usefull, probably the card has got out */
-			dev_alert(card->dev, "got cmd 0x%02x,"
-				"I suspect the card is lost\n", cmd);
-		}
-		/*dev_info(card->dev, "0x%02x\n", cmd);*/
-		bus = card->bus[0];
-		if (cmd & CMD_BUS2)
-			bus = card->bus[1];
+	ptr = &card->dpram.rx->fifo[fifo_rd][0];
+
+	cmd = *ptr++;
+	if (cmd == 0xff) {
+		/*not quite usefull, probably the card has got out */
+		dev_alert(card->dev, "got cmd 0x%02x,"
+			" I suspect the card is lost\n", cmd);
+	}
+	/*mod_trace("0x%02x", cmd);*/
+	bus = card->bus[0];
+	if (cmd & CMD_BUS2)
+		bus = card->bus[1];
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,23)
-		stats = can_get_stats(bus->netdev);
+	stats = can_get_stats(bus->netdev);
 #else
-		stats = &bus->netdev->stats;
+	stats = &bus->netdev->stats;
 #endif
-		if (cmd & CMD_ERR) {
-			u8 can_state;
-			u8 state;
-			state = *ptr++;
+	if (cmd & CMD_ERR) {
+		u8 can_state;
+		u8 state;
+		state = *ptr++;
 
-			msg.can_id = CAN_ERR_FLAG;
-			msg.can_dlc = CAN_ERR_DLC;
+		msg.can_id = CAN_ERR_FLAG;
+		msg.can_dlc = CAN_ERR_DLC;
 
-			if (state & 0x80) {
-				can_state = CAN_STATE_BUS_OFF;
-				msg.can_id |= CAN_ERR_BUSOFF;
-				state = 2;
-			} else if (state & 0x60) {
-				can_state = CAN_STATE_ERROR_PASSIVE;
-				msg.can_id |= CAN_ERR_BUSERROR;
-				state = 1;
-			} else {
-				can_state = CAN_STATE_ERROR_ACTIVE;
-				state = 0;
-				do_skb = 0;
-			}
-			/*update DPRAM */
-			if (!bus->index)
-				card->dpram.info->bus_state = state;
-			else
-				card->dpram.info->bus_state2 = state;
-			/*timestamp */
-			tmp =	 (ptr[0] <<  0)
-				|(ptr[1] <<  8)
-				|(ptr[2] << 16)
-				|(ptr[3] << 24);
-			ptr += 4;
-			/*msg.time = */ softing_time2usec(card, tmp);
-			/*trigger dual port RAM */
-			mb();
-			card->dpram.rx->rd = fifo_rd;
-			/*update internal status */
-			if (can_state != bus->can.state) {
-				bus->can.state = can_state;
-				if (can_state == 1)
-					bus->can.can_stats.error_passive += 1;
-			}
-			bus->can.can_stats.bus_error += 1;
+		if (state & 0x80) {
+			can_state = CAN_STATE_BUS_OFF;
+			msg.can_id |= CAN_ERR_BUSOFF;
+			state = 2;
+		} else if (state & 0x60) {
+			can_state = CAN_STATE_ERROR_PASSIVE;
+			msg.can_id |= CAN_ERR_BUSERROR;
+			msg.data[1] = CAN_ERR_CRTL_TX_PASSIVE;
+			state = 1;
+		} else {
+			can_state = CAN_STATE_ERROR_ACTIVE;
+			state = 0;
+			msg.can_id |= CAN_ERR_BUSERROR;
+		}
+		/*update DPRAM */
+		if (!bus->index)
+			card->dpram.info->bus_state = state;
+		else
+			card->dpram.info->bus_state2 = state;
+		/*timestamp */
+		tmp = (ptr[0] <<  0) | (ptr[1] <<  8)
+		    | (ptr[2] << 16) | (ptr[3] << 24);
+		ptr += 4;
+		ktime = softing_raw2ktime(card, tmp);
+		/*trigger dual port RAM */
+		mb();
+		card->dpram.rx->rd = fifo_rd;
 
-			/*trigger socketcan */
-			if (state == 2) {
+		++bus->can.can_stats.bus_error;
+		++stats->rx_errors;
+		/*update internal status */
+		if (can_state != bus->can.state) {
+			bus->can.state = can_state;
+			if (can_state == CAN_STATE_ERROR_PASSIVE)
+				++bus->can.can_stats.error_passive;
+			if (can_state == CAN_STATE_BUS_OFF) {
 				/* this calls can_close_cleanup() */
-				softing_flush_echo_skb(bus);
 				can_bus_off(bus->netdev);
 				netif_stop_queue(bus->netdev);
 			}
-			if ((state == CAN_STATE_BUS_OFF)
-				 || (state == CAN_STATE_ERROR_PASSIVE)) {
-				skb = dev_alloc_skb(sizeof(msg));
-				if (!skb)
-					return -ENOMEM;
-				skb->dev = bus->netdev;
-				skb->protocol = htons(ETH_P_CAN);
-				skb->ip_summed = CHECKSUM_UNNECESSARY;
-				memcpy(skb_put(skb, sizeof(msg)), &msg,
-						 sizeof(msg));
-				if (netif_rx(skb))
-					dev_kfree_skb_irq(skb);
-			}
-		} else {
-			if (cmd & CMD_RTR)
-				msg.can_id |= CAN_RTR_FLAG;
-			/* acknowledge, was tx msg
-			 * no real tx flag to set
-			if (cmd & CMD_ACK) {
-			}
-			 */
-			msg.can_dlc = *ptr++;
-			if (msg.can_dlc > 8)
-				msg.can_dlc = 8;
-			if (cmd & CMD_XTD) {
-				msg.can_id |= CAN_EFF_FLAG;
-				msg.can_id |=
-						(ptr[0] << 0)
-					 | (ptr[1] << 8)
-					 | (ptr[2] << 16)
-					 | (ptr[3] << 24);
-				ptr += 4;
-			} else {
-				msg.can_id |= (ptr[0] << 0) | (ptr[1] << 8);
-				ptr += 2;
-			}
-			tmp = (ptr[0] << 0)
-				 | (ptr[1] << 8)
-				 | (ptr[2] << 16)
-				 | (ptr[3] << 24);
-			ptr += 4;
-			/*msg.time = */ softing_time2usec(card, tmp);
-			memcpy_fromio(&msg.data[0], ptr, 8);
-			ptr += 8;
-			/*trigger dual port RAM */
-			mb();
-			card->dpram.rx->rd = fifo_rd;
-			/*update socket */
-			if (cmd & CMD_ACK) {
-				can_get_echo_skb(bus->netdev, bus->tx.echo_get);
-				++bus->tx.echo_get;
-				if (bus->tx.echo_get >= CAN_ECHO_SKB_MAX)
-					bus->tx.echo_get = 0;
-				if (bus->tx.pending)
-					--bus->tx.pending;
-				if (card->tx.pending)
-					--card->tx.pending;
-				stats->tx_packets += 1;
-				stats->tx_bytes += msg.can_dlc;
-			} else {
-				stats->rx_packets += 1;
-				stats->rx_bytes += msg.can_dlc;
-				bus->netdev->last_rx = jiffies;
-				skb = dev_alloc_skb(sizeof(msg));
-				if (skb) {
-					skb->dev = bus->netdev;
-					skb->protocol = htons(ETH_P_CAN);
-					skb->ip_summed = CHECKSUM_UNNECESSARY;
-					memcpy(skb_put(skb, sizeof(msg)), &msg,
-							 sizeof(msg));
-					if (netif_rx(skb))
-						dev_kfree_skb_irq(skb);
-				}
-			}
+			/*trigger socketcan */
+			softing_rx(bus->netdev, &msg, ktime);
 		}
-		++cnt;
+
+	} else {
+		if (cmd & CMD_RTR)
+			msg.can_id |= CAN_RTR_FLAG;
+		/* acknowledge, was tx msg
+		 * no real tx flag to set
+		if (cmd & CMD_ACK) {
+		}
+		 */
+		msg.can_dlc = *ptr++;
+		if (msg.can_dlc > 8)
+			msg.can_dlc = 8;
+		if (cmd & CMD_XTD) {
+			msg.can_id |= CAN_EFF_FLAG;
+			msg.can_id |= (ptr[0] <<  0) | (ptr[1] <<  8)
+				    | (ptr[2] << 16) | (ptr[3] << 24);
+			ptr += 4;
+		} else {
+			msg.can_id |= (ptr[0] << 0) | (ptr[1] << 8);
+			ptr += 2;
+		}
+		tmp = (ptr[0] <<  0) | (ptr[1] <<  8)
+		    | (ptr[2] << 16) | (ptr[3] << 24);
+		ptr += 4;
+		ktime = softing_raw2ktime(card, tmp);
+		memcpy_fromio(&msg.data[0], ptr, 8);
+		ptr += 8;
+		/*trigger dual port RAM */
+		mb();
+		card->dpram.rx->rd = fifo_rd;
+		/*update socket */
+		if (cmd & CMD_ACK) {
+			struct sk_buff *skb;
+			skb = bus->can.echo_skb[bus->tx.echo_get];
+			if (skb)
+				skb->tstamp = ktime;
+			can_get_echo_skb(bus->netdev, bus->tx.echo_get);
+			++bus->tx.echo_get;
+			if (bus->tx.echo_get >= CAN_ECHO_SKB_MAX)
+				bus->tx.echo_get = 0;
+			if (bus->tx.pending)
+				--bus->tx.pending;
+			if (card->tx.pending)
+				--card->tx.pending;
+			++stats->tx_packets;
+			stats->tx_bytes += msg.can_dlc;
+		} else {
+			++stats->rx_packets;
+			stats->rx_bytes += msg.can_dlc;
+			bus->netdev->last_rx = jiffies;
+			softing_rx(bus->netdev, &msg, ktime);
+		}
 	}
+	++cnt;
 	return cnt;
 }
 
@@ -364,16 +348,22 @@ static void softing_dev_svc(unsigned long param)
 	spin_lock(&card->spin);
 	while (softing_dev_svc_once(card) > 0)
 		++card->irq.svc_count;
+	spin_unlock(&card->spin);
 	/*resume tx queue's */
 	offset = card->tx.last_bus;
 	for (j = 0; j < card->nbus; ++j) {
 		if (card->tx.pending >= TXMAX)
 			break;
-		bus = card->bus[(j + offset) % card->nbus];
-		if (netif_carrier_ok(bus->netdev))
-			netif_wake_queue(bus->netdev);
+		bus = card->bus[(j + offset + 1) % card->nbus];
+		if (!bus)
+			continue;
+		if (!canif_is_active(bus->netdev))
+			/* it makes no sense to wake dead busses */
+			continue;
+		if (bus->tx.pending >= CAN_ECHO_SKB_MAX)
+			continue;
+		netif_wake_queue(bus->netdev);
 	}
-	spin_unlock(&card->spin);
 }
 
 static
@@ -420,32 +410,18 @@ static int netdev_open(struct net_device *ndev)
 {
 	struct softing_priv *priv = netdev_priv(ndev);
 	struct softing *card = priv->card;
-	int fw;
 	int ret;
 
 	/* check or determine and set bittime */
 	ret = open_candev(ndev);
 	if (ret)
-		return ret;
-	if (mutex_lock_interruptible(&card->fw.lock)) {
-		ret = -ERESTARTSYS;
-		goto out_close;
-	}
-	fw = card->fw.up;
-	if (fw)
-		softing_reinit(card
-			, (card->bus[0] == priv) ? 1 : -1
-			, (card->bus[1] == priv) ? 1 : -1);
-	mutex_unlock(&card->fw.lock);
-	if (!fw) {
-		ret = -EIO;
-		goto out_close;
-	}
+		goto failed;
+	ret = softing_cycle(card, priv, 1);
+	if (ret)
+		goto failed;
 	netif_start_queue(ndev);
 	return 0;
-
-out_close:
-	close_candev(ndev);
+failed:
 	return ret;
 }
 
@@ -453,50 +429,26 @@ static int netdev_stop(struct net_device *ndev)
 {
 	struct softing_priv *priv = netdev_priv(ndev);
 	struct softing *card = priv->card;
-	int fw;
+	int ret;
 
 	netif_stop_queue(ndev);
-	netif_carrier_off(ndev);
-	softing_flush_echo_skb(priv);
-	close_candev(ndev);
-	if (mutex_lock_interruptible(&card->fw.lock))
-		return -ERESTARTSYS;
-	fw = card->fw.up;
-	if (fw)
-		softing_reinit(card
-			, (card->bus[0] == priv) ? 0 : -1
-			, (card->bus[1] == priv) ? 0 : -1);
-	mutex_unlock(&card->fw.lock);
-	if (!fw)
-		return -EIO;
-	return 0;
-}
 
-static int candev_get_state(const struct net_device *ndev,
-			    enum can_state *state)
-{
-	struct softing_priv *priv = netdev_priv(ndev);
-	if (priv->netdev->flags & IFF_UP)
-		*state = CAN_STATE_STOPPED;
-	else if (priv->can.state == CAN_STATE_STOPPED)
-		*state = CAN_STATE_STOPPED;
-	else
-		*state = CAN_STATE_ERROR_ACTIVE;
-	return 0;
+	/* softing cycle does close_candev() */
+	ret = softing_cycle(card, priv, 0);
+	return ret;
 }
 
 static int candev_set_mode(struct net_device *ndev, enum can_mode mode)
 {
 	struct softing_priv *priv = netdev_priv(ndev);
 	struct softing *card = priv->card;
+	int ret;
+
 	switch (mode) {
 	case CAN_MODE_START:
-		/*recovery from busoff? */
-		if (mutex_lock_interruptible(&card->fw.lock))
-			return -ERESTARTSYS;
-		softing_reinit(card, -1, -1);
-		mutex_unlock(&card->fw.lock);
-		break;
+		/* softing cycle does close_candev() */
+		ret = softing_cycle(card, priv, 1);
+		return ret;
 	case CAN_MODE_STOP:
 	case CAN_MODE_SLEEP:
 		return -EOPNOTSUPP;
@@ -698,7 +650,6 @@ static struct softing_priv *mk_netdev(struct softing *card, u16 chip_id)
 	ndev->stop		= netdev_stop;
 	ndev->hard_start_xmit	= netdev_start_xmit;
 #endif
-	priv->can.do_get_state	= candev_get_state;
 	priv->can.do_set_mode	= candev_set_mode;
 
 	return priv;
@@ -707,7 +658,6 @@ static struct softing_priv *mk_netdev(struct softing *card, u16 chip_id)
 static int reg_netdev(struct softing_priv *priv)
 {
 	int ret;
-	netif_carrier_off(priv->netdev);
 	ret = register_candev(priv->netdev);
 	if (ret) {
 		dev_alert(priv->card->dev, "%s, register failed\n",
