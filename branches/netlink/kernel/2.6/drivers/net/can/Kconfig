@@ -77,6 +77,14 @@ config CAN_CC770
 	  Driver for the Bosch CC770 and the compatible Intel AN82527
 	  CAN controllers.
 
+config CAN_CC770_ISA
+	depends on CAN_CC770 && ISA
+	tristate "ISA Bus based legacy CC770 driver"
+	---help---
+	  This driver adds legacy support for CC770 and AN82527 chips
+	  connected to the ISA bus using I/O port, memory mapped or
+	  indirect access.
+
 config CAN_SJA1000
 	depends on CAN_DEV
 	tristate "Philips SJA1000"
