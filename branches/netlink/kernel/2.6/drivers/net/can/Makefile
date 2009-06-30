@@ -13,6 +13,7 @@ export CONFIG_CAN_VCAN=m
 export CONFIG_CAN_DEV=m
 #export CONFIG_CAN_SJA1000_OLD=m
 #export CONFIG_CAN_I82527_OLD=m
+export CONFIG_CAN_CC770=m
 export CONFIG_CAN_SJA1000=m
 export CONFIG_CAN_SJA1000_PLATFORM=m
 export CONFIG_CAN_EMS_PCI=m
@@ -37,6 +38,7 @@ obj-$(CONFIG_CAN_DEV)		+= can-dev.o
 can-dev-y			:= dev.o
 can-dev-$(CONFIG_CAN_DEV_SYSFS) += sysfs.o
 
+obj-$(CONFIG_CAN_CC770)		+= cc770/
 obj-$(CONFIG_CAN_SJA1000)	+= sja1000/
 obj-$(CONFIG_CAN_SOFTING)	+= softing/
 obj-$(CONFIG_CAN_MSCAN)		+= mscan/
