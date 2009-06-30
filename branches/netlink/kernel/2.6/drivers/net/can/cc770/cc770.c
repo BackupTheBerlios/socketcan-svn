@@ -845,6 +845,7 @@ static int cc770_close(struct net_device *dev)
 	netif_stop_queue(dev);
 	set_reset_mode(dev);
 
+	free_irq(dev->irq, (void *)dev);
 	close_candev(dev);
 
 	priv->open_time = 0;
