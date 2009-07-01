@@ -287,10 +287,6 @@ static void chipset_init(struct cc770_priv *priv)
 	/* Enable configuration and put chip in bus-off, disable interrupts */
 	cc770_write_reg(priv, control, (CTRL_CCE | CTRL_INI));
 
-	/* Check if this chip is a CC770 supporting additional functions */
-	if (cc770_read_reg(priv, control) & CTRL_EAF)
-		priv->control_normal_mode |= CTRL_EAF;
-
 	/* Set CLKOUT divider and slew rates */
 	cc770_write_reg(priv, clkout, priv->clkout);
 
