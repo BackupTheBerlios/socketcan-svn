@@ -17,6 +17,7 @@ else
 
 obj-$(CONFIG_CAN_CC770) += cc770.o
 obj-$(CONFIG_CAN_CC770_ISA) += cc770_isa.o
+obj-$(CONFIG_CAN_CC770_OF_PLATFORM) += cc770_of_platform.o
 
 ifeq ($(CONFIG_CAN_DEBUG_DEVICES),y)
 	EXTRA_CFLAGS += -DDEBUG
