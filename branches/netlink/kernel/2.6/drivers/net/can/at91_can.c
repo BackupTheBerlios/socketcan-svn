@@ -534,8 +534,8 @@ static void at91_irq_tx(struct net_device *dev, u32 reg_sr)
 		at91_write(dev, AT91_IDR, 1 << mb);
 
 		/*
-		 * only echo if mailbox signals us an transfer
-		 * complete (MSR_MRDY). Otherwise it's an tansfer
+		 * only echo if mailbox signals us a transfer
+		 * complete (MSR_MRDY). Otherwise it's a tansfer
 		 * abort. "can_bus_off()" takes care about the skbs
 		 * parked in the echo queue.
 		 */
@@ -548,7 +548,7 @@ static void at91_irq_tx(struct net_device *dev, u32 reg_sr)
 
 	/*
 	 * restart queue if we don't have a wrap around but restart if
-	 * we get an TX int for the last can frame directly before a
+	 * we get a TX int for the last can frame directly before a
 	 * wrap around.
 	 */
 	if ((priv->tx_next & AT91_NEXT_MASK) != 0 ||
@@ -837,32 +837,6 @@ static void at91_setup_mailboxes(struct net_device *dev)
 	priv->tx_next = priv->tx_echo = priv->rx_bank = 0;
 }
 
-
-static struct net_device_stats *at91_get_stats(struct net_device *dev)
-{
-	struct at91_priv *priv = netdev_priv(dev);
-	u32 reg_ecr = at91_read(dev, AT91_ECR);
-
-	dev->stats.rx_errors = reg_ecr & 0xff;
-	dev->stats.tx_errors = reg_ecr >> 16;
-
-	/*
-	 * here comes another one:
-	 *
-	 * the transmit error counter (TEC) has only a width of 8
-	 * bits, so when the devices goes into BUS OFF (which is
-	 * defined by a TEC > 255), the TEC in the chip shows "0". Not
-	 * only that, it keeps accumulating errors, so they can vary
-	 * between 0 and 255. We set TEC to 256 (hard) in BUS_OFF.
-	 *
-	 */
-	if (unlikely(priv->can.state == CAN_STATE_BUS_OFF))
-		dev->stats.tx_errors = 256;
-
-	return &dev->stats;
-}
-
-
 static int at91_set_bittiming(struct net_device *dev)
 {
 	struct at91_priv *priv = netdev_priv(dev);
@@ -1064,7 +1038,6 @@ static int __init at91_can_probe(struct platform_device *pdev)
 	dev->stop		= at91_close;
 	dev->hard_start_xmit	= at91_start_xmit;
 #endif
-	dev->get_stats		= at91_get_stats;
 	dev->irq		= irq;
 	dev->flags		|= IFF_ECHO;
 
