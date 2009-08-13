@@ -270,7 +270,7 @@ static int at91_start_xmit(struct sk_buff *skb, struct net_device *dev)
 	else
 		reg_mid = (cf->can_id & CAN_SFF_MASK) << 18;
 
-	reg_mcr = (cf->can_id & CAN_RTR_FLAG) ? AT91_MCR_MRTR : 0 |
+	reg_mcr = ((cf->can_id & CAN_RTR_FLAG) ? AT91_MCR_MRTR : 0 ) |
 		(cf->can_dlc << 16) |
 		AT91_MCR_MTCR;
 
