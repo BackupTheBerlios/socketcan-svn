@@ -269,7 +269,11 @@ static unsigned int  __devinit mpc52xx_can_xtal_freq(struct device_node *np)
 	unsigned int freq;
 	u32 val;
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,31)
 	freq = mpc52xx_find_ipb_freq(np);
+#else
+	freq = mpc5xxx_get_bus_frequency(np);
+#endif
 	if (!freq)
 		return 0;
 
@@ -317,8 +321,13 @@ static unsigned int  __devinit mpc52xx_can_clock_freq(struct device_node *np,
 
 	pvr = mfspr(SPRN_PVR);
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,31)
 	if (clock_src == MSCAN_CLKSRC_BUS || pvr == 0x80822011)
 		return mpc52xx_find_ipb_freq(np);
+#else
+	if (clock_src == MSCAN_CLKSRC_BUS || pvr == 0x80822011)
+		return mpc5xxx_get_bus_frequency(np);
+#endif
 
 	return mpc52xx_can_xtal_freq(np);
 }
