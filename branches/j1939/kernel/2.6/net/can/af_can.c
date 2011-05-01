@@ -3,6 +3,7 @@
  *            (used by different CAN protocol modules)
  *
  * Copyright (c) 2002-2007 Volkswagen Group Electronic Research
+ * Copyright (C) 2011 Kurt Van Dijck <kurt.van.dijck@eia.be>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -82,7 +83,8 @@ static __initdata const char banner[] = KERN_INFO
 MODULE_DESCRIPTION("Controller Area Network PF_CAN core");
 MODULE_LICENSE("Dual BSD/GPL");
 MODULE_AUTHOR("Urs Thuermann <urs.thuermann@volkswagen.de>, "
-	      "Oliver Hartkopp <oliver.hartkopp@volkswagen.de>");
+	      "Oliver Hartkopp <oliver.hartkopp@volkswagen.de>, "
+	      "Kurt Van Dijck <kurt.van.dijck@eia.be>");
 
 MODULE_ALIAS_NETPROTO(PF_CAN);
 
@@ -101,7 +103,7 @@ static kmem_cache_t *rcv_cache;
 #endif
 
 /* table of registered CAN protocols */
-static struct can_proto *proto_tab[CAN_NPROTO] __read_mostly;
+static const struct can_proto *proto_tab[CAN_NPROTO] __read_mostly;
 static DEFINE_MUTEX(proto_tab_lock);
 
 struct timer_list can_stattimer;   /* timer for statistics update */
@@ -140,9 +142,9 @@ static void can_sock_destruct(struct sock *sk)
 #endif
 }
 
-static struct can_proto *can_try_module_get(int protocol)
+static const struct can_proto *can_try_module_get(int protocol)
 {
-	struct can_proto *cp;
+	const struct can_proto *cp;
 
 	rcu_read_lock();
 	cp = rcu_dereference(proto_tab[protocol]);
@@ -156,6 +158,11 @@ static struct can_proto *can_try_module_get(int protocol)
 	rcu_read_unlock();
 
 	return cp;
+}
+
+static inline void can_put_proto(const struct can_proto *cp)
+{
+	module_put(cp->prot->owner);
 }
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,33)
@@ -203,8 +210,8 @@ static int can_create(struct socket *sock, int protocol)
 
 	/* check for available protocol and correct usage */
 
-	if (!cp)
-		return -EPROTONOSUPPORT;
+	if (IS_ERR(cp))
+		return PTR_ERR(cp);
 
 	if (cp->type != sock->type) {
 		err = -EPROTOTYPE;
@@ -262,7 +269,7 @@ static int can_create(struct socket *sock, int protocol)
 
  errout:
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,12)
-	module_put(cp->prot->owner);
+	can_put_proto(cp);
 #else
 	module_put(cp->owner);
 #endif
@@ -858,7 +865,7 @@ drop:
  *  -EBUSY  protocol already in use
  *  -ENOBUF if proto_register() fails
  */
-int can_proto_register(struct can_proto *cp)
+int can_proto_register(const struct can_proto *cp)
 {
 	int proto = cp->protocol;
 	int err = 0;
@@ -899,7 +906,7 @@ EXPORT_SYMBOL(can_proto_register);
  * can_proto_unregister - unregister CAN transport protocol
  * @cp: pointer to CAN protocol structure
  */
-void can_proto_unregister(struct can_proto *cp)
+void can_proto_unregister(const struct can_proto *cp)
 {
 	int proto = cp->protocol;
 
@@ -1021,6 +1028,206 @@ static struct notifier_block can_netdev_notifier __read_mostly = {
 	.notifier_call = can_notifier,
 };
 
+/*
+ * RTNETLINK
+ */
+static int can_rtnl_doit(struct sk_buff *skb, struct nlmsghdr *nlh, void *arg)
+{
+	int ret, protocol;
+	const struct can_proto *cp;
+	rtnl_doit_func fn;
+
+	protocol = ((struct rtgencanmsg *)NLMSG_DATA(nlh))->can_protocol;
+	/* since rtnl_lock is held, dont try to load protocol */
+	cp = can_get_proto(protocol, 0);
+	if (IS_ERR(cp))
+		return PTR_ERR(cp);
+
+	switch (nlh->nlmsg_type) {
+	case RTM_NEWADDR:
+		fn = cp->rtnl_new_addr;
+		break;
+	case RTM_DELADDR:
+		fn = cp->rtnl_del_addr;
+		break;
+	default:
+		fn = 0;
+		break;
+	}
+	if (fn)
+		ret = fn(skb, nlh, arg);
+	else
+		ret = -EPROTONOSUPPORT;
+	can_put_proto(cp);
+	return ret;
+}
+
+static int can_rtnl_dumpit(struct sk_buff *skb, struct netlink_callback *cb,
+		int offset)
+{
+	int ret, j;
+	const struct can_proto *cp;
+	rtnl_dumpit_func fn;
+
+	ret = 0;
+	for (j = cb->args[0]; j < CAN_NPROTO; ++j) {
+		/* save state */
+		cb->args[0] = j;
+		cp = can_get_proto(j, 0);
+		if (IS_ERR(cp))
+			/* we are looping, any error is our own fault */
+			continue;
+		fn = *((rtnl_dumpit_func *)(&((const uint8_t *)cp)[offset]));
+		if (fn)
+			ret = fn(skb, cb);
+		can_put_proto(cp);
+		if (ret < 0)
+			/* suspend this skb */
+			return ret;
+	}
+	return ret;
+}
+
+static int can_rtnl_dump_addr(struct sk_buff *skb, struct netlink_callback *cb)
+{
+	return can_rtnl_dumpit(skb, cb,
+			offsetof(struct can_proto, rtnl_dump_addr));
+}
+
+/*
+ * LINK AF properties
+ */
+static size_t can_get_link_af_size(const struct net_device *dev)
+{
+	int ret, j, total;
+	const struct can_proto *cp;
+
+	if (!net_eq(dev_net(dev), &init_net) || (dev->type != ARPHRD_CAN))
+		return 0;
+
+	total = 0;
+	for (j = 0; j < CAN_NPROTO; ++j) {
+		cp = can_try_mdoule_get(j);
+		if (IS_ERR(cp))
+			/* no worry */
+			continue;
+		ret = 0;
+		if (cp->rtnl_link_ops && cp->rtnl_link_ops->get_link_af_size)
+			ret = cp->rtnl_link_ops->get_link_af_size(dev) +
+				nla_total_size(sizeof(struct nlattr));
+		can_put_proto(cp);
+		if (ret < 0)
+			return ret;
+		total += ret;
+	}
+	return nla_total_size(total);
+}
+
+static int can_fill_link_af(struct sk_buff *skb, const struct net_device *dev)
+{
+	int ret, j, n;
+	struct nlattr *nla;
+	const struct can_proto *cp;
+
+	if (!net_eq(dev_net(dev), &init_net) || (dev->type != ARPHRD_CAN))
+		return -ENODATA;
+
+	n = 0;
+	for (j = 0; j < CAN_NPROTO; ++j) {
+		cp = can_try_module_get(j);
+		if (IS_ERR(cp))
+			/* no worry */
+			continue;
+		if (cp->rtnl_link_ops && cp->rtnl_link_ops->fill_link_af) {
+			nla = nla_nest_start(skb, j);
+			if (!nla)
+				goto nla_put_failure;
+
+			ret = cp->rtnl_link_ops->fill_link_af(skb, dev);
+			/*
+			 * Caller may return ENODATA to indicate that there
+			 * was no data to be dumped. This is not an error, it
+			 * means we should trim the attribute header and
+			 * continue.
+			 */
+			if (ret == -ENODATA)
+				nla_nest_cancel(skb, nla);
+			else if (ret < 0)
+				goto nla_put_failure;
+			nla_nest_end(skb, nla);
+			++n;
+		}
+		can_put_proto(cp);
+	}
+	return n ? 0 : -ENODATA;
+
+nla_put_failure:
+	nla_nest_cancel(skb, nla);
+	can_put_proto(cp);
+	return -EMSGSIZE;
+}
+
+static int can_validate_link_af(const struct net_device *dev,
+				 const struct nlattr *nla)
+{
+	int ret, rem;
+	const struct can_proto *cp;
+	struct nlattr *prot;
+
+	if (!net_eq(dev_net(dev), &init_net) || (dev->type != ARPHRD_CAN))
+		return -EPROTONOSUPPORT;
+
+	nla_for_each_nested(prot, nla, rem) {
+		cp = can_try_module_get(nla_type(prot));
+		if (IS_ERR(cp))
+			return PTR_ERR(cp);
+		if (!cp->rtnl_link_ops)
+			ret = -EPROTONOSUPPORT;
+		else if (!cp->rtnl_link_ops->validate_link_af)
+			ret = 0;
+		else
+			ret = cp->rtnl_link_ops->validate_link_af(dev, prot);
+		can_put_proto(cp);
+		if (ret < 0)
+			return ret;
+	}
+	return 0;
+}
+
+static int can_set_link_af(struct net_device *dev, const struct nlattr *nla)
+{
+	int ret, rem;
+	const struct can_proto *cp;
+	struct nlattr *prot;
+
+	if (!net_eq(dev_net(dev), &init_net) || (dev->type != ARPHRD_CAN))
+		return -EPROTONOSUPPORT;
+
+	nla_for_each_nested(prot, nla, rem) {
+		cp = can_try_module_get(nla_type(prot));
+		if (IS_ERR(cp))
+			return PTR_ERR(cp);
+		if (!cp->rtnl_link_ops || !cp->rtnl_link_ops->set_link_af)
+			ret = -EPROTONOSUPPORT;
+		else
+			ret = cp->rtnl_link_ops->set_link_af(dev, prot);
+		can_put_proto(cp);
+		if (ret < 0)
+			return ret;
+	}
+	return 0;
+}
+
+static struct rtnl_af_ops can_rtnl_af_ops = {
+	.family		  = AF_CAN,
+	.fill_link_af	  = can_fill_link_af,
+	.get_link_af_size = can_get_link_af_size,
+	.validate_link_af = can_validate_link_af,
+	.set_link_af	  = can_set_link_af,
+};
+
+/* exported init */
+
 static __init int can_init(void)
 {
 	printk(banner);
@@ -1059,6 +1266,11 @@ static __init int can_init(void)
 	register_netdevice_notifier(&can_netdev_notifier);
 	dev_add_pack(&can_packet);
 
+	rtnl_af_register(&can_rtnl_af_ops);
+	rtnl_register(PF_CAN, RTM_NEWADDR, can_rtnl_doit, NULL);
+	rtnl_register(PF_CAN, RTM_DELADDR, can_rtnl_doit, NULL);
+	rtnl_register(PF_CAN, RTM_GETADDR, NULL, can_rtnl_dump_addr);
+
 	return 0;
 }
 
@@ -1069,6 +1281,11 @@ static __exit void can_exit(void)
 
 	if (stats_timer)
 		del_timer(&can_stattimer);
+
+	rtnl_unregister(PF_CAN, RTM_NEWADDR);
+	rtnl_unregister(PF_CAN, RTM_DELADDR);
+	rtnl_unregister(PF_CAN, RTM_GETADDR);
+	rtnl_af_unregister(&can_rtnl_af_ops);
 
 	can_remove_proc();
 

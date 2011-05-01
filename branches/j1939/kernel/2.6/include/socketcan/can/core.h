@@ -20,6 +20,7 @@
 #include <socketcan/can.h>
 #include <linux/skbuff.h>
 #include <linux/netdevice.h>
+#include <net/rtnetlink.h>
 
 #define CAN_VERSION "20090105"
 
@@ -52,6 +53,27 @@ struct can_proto {
 	int (*init)(struct sock *sk);
 	size_t obj_size;
 #endif
+	const struct rtnl_af_ops *rtnl_link_ops;
+	/*
+	 * hooks for rtnl hooks
+	 * for the *dump* functions, cb->args[0] is reserved
+	 * for use by af_can.c, so keep your fingers off.
+	 */
+	rtnl_doit_func rtnl_new_addr;
+	rtnl_doit_func rtnl_del_addr;
+	rtnl_dumpit_func rtnl_dump_addr;
+};
+
+/*
+ * this is quite a dirty hack:
+ * reuse the second byte of a rtnetlink msg
+ * to indicate the precise protocol.
+ * The major problem is that is may conflict
+ * with the prefixlen in struct ifaddrmsg.
+ */
+struct rtgencanmsg {
+	unsigned char rtgen_family;
+	unsigned char can_protocol;
 };
 
 /*
@@ -65,8 +87,8 @@ struct can_proto {
 
 /* function prototypes for the CAN networklayer core (af_can.c) */
 
-extern int  can_proto_register(struct can_proto *cp);
-extern void can_proto_unregister(struct can_proto *cp);
+extern int  can_proto_register(const struct can_proto *cp);
+extern void can_proto_unregister(const struct can_proto *cp);
 
 extern int  can_rx_register(struct net_device *dev, canid_t can_id,
 			    canid_t mask,
