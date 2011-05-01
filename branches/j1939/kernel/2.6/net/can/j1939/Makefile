@@ -1,5 +1,7 @@
+
+
 #
-#  $Id$
+#  $Id: Makefile 1127 2010-02-18 18:37:20Z hartkopp $
 #
 
 ifeq ($(KERNELRELEASE),)
@@ -22,21 +24,17 @@ else
 
 -include $(TOPDIR)/Makefile.common
 
-obj-$(CONFIG_CAN)	+= can.o
-can-objs		:= af_can.o proc.o
+obj-$(CONFIG_CAN_J1939)	+= can-j1939.o
 
-obj-$(CONFIG_CAN_RAW)	+= can-raw.o
-can-raw-objs		:= raw.o
+can-j1939-objs := main.o \
+	proc.o bus.o \
+	rtnl.o \
+	socket.o \
+	address-claim.o transport.o \
+	promisc.o filter.o
 
-obj-$(CONFIG_CAN_BCM)	+= can-bcm.o
-can-bcm-objs		:= bcm.o
-
-obj-$(CONFIG_CAN_ISOTP)	+= can-isotp.o
-can-isotp-objs		:= isotp.o
-
-obj-$(CONFIG_CAN_GW)	+= can-gw.o
-can-gw-objs		:= gw.o
-
-obj-$(CONFIG_CAN_J1939)	+= j1939/
+ifeq ($(CONFIG_CAN_J1939_DEBUG),y)
+	EXTRA_CFLAGS += -DDEBUG
+endif
 
 endif

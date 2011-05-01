@@ -69,4 +69,6 @@ config CAN_ISOTP
 	  - when a transfer (tx) is on the run the next write() blocks
 	    until the running transfer is done
 
+source "net/can/j1939/Kconfig"
+
 source "drivers/net/can/Kconfig"
