@@ -56,15 +56,19 @@ CFLAGS    = -O2 -Wall -Wno-parentheses -I$(KERNELDIR)/include \
 PROGRAMS_ISOTP = isotpdump isotprecv isotpsend isotpsniffer isotptun isotpserver
 PROGRAMS_CANGW = cangw
 PROGRAMS_SLCAN = slcan_attach slcand
+PROGRAMS_J1939 = jacd jspy jsr
 PROGRAMS = can-calc-bit-timing candump cansniffer cansend canplayer cangen canbusload\
 	   log2long log2asc asc2log\
 	   canlogserver bcmserver\
 	   $(PROGRAMS_ISOTP)\
 	   $(PROGRAMS_CANGW)\
 	   $(PROGRAMS_SLCAN)\
+	   $(PROGRAMS_J1939)\
 	   slcanpty canfdtest
 
-all: $(PROGRAMS)
+LIBRARIES = libj1939.a
+
+all: $(PROGRAMS) $(LIBRARIES)
 
 clean:
 	rm -f $(PROGRAMS) *.o
@@ -72,9 +76,15 @@ clean:
 install:
 	mkdir -p $(DESTDIR)$(PREFIX)/bin
 	cp -f $(PROGRAMS) $(DESTDIR)$(PREFIX)/bin
+	mkdir -p $(DESTDIR)$(PREFIX)/lib
+	cp -f $(LIBRARIES) $(DESTDIR)$(PREFIX)/lib
+
 
 distclean:
-	rm -f $(PROGRAMS) *.o *~
+	rm -f $(PROGRAMS) $(LIBRARIES) *.o *~
+
+libj1939.a: libj1939.o
+	ar crs $@ $<
 
 cansend.o:	lib.h
 cangen.o:	lib.h
@@ -94,3 +104,7 @@ canlogserver:	canlogserver.o	lib.o
 log2long:	log2long.o	lib.o
 log2asc:	log2asc.o	lib.o
 asc2log:	asc2log.o	lib.o
+
+jspy: libj1939.a
+jsr: libj1939.a
+

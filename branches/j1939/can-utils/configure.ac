@@ -108,6 +108,7 @@ AC_SUBST(linux_CFLAGS)
 AC_CHECK_HEADERS([ \
 	linux/can/gw.h \
 	linux/can/isotp.h \
+	linux/can/j1939.h \
 	],[],[],
 [
 #ifdef HAVE_SYS_SOCKET_H
@@ -117,6 +118,7 @@ AC_CHECK_HEADERS([ \
 
 AM_CONDITIONAL(CONFIG_GW, [test "${ac_cv_header_linux_can_gw_h}" = "yes"])
 AM_CONDITIONAL(CONFIG_ISOTP, [test "${ac_cv_header_linux_can_isotp_h}" = "yes"])
+AM_CONDITIONAL(CONFIG_J1939, [test "${ac_cv_header_linux_can_j1939_h}" = "yes"])
 
 
 AC_CHECK_DECL(SO_RXQ_OVFL,,
