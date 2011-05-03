@@ -19,7 +19,11 @@
 #include <linux/proc_fs.h>
 #include <linux/module.h>
 #include <socketcan/can/j1939.h>
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,37)
 #include <linux/atomic.h>
+#else
+#include <asm/atomic.h>
+#endif
 
 /* TODO: return ENETRESET on busoff. */
 
@@ -306,7 +310,9 @@ extern void j1939sk_module_exit(void);
 extern void j1939tp_module_exit(void);
 
 /* rtnetlink */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,36)
 extern const struct rtnl_af_ops j1939_rtnl_af_ops;
+#endif
 extern int j1939rtnl_new_addr(struct sk_buff *, struct nlmsghdr *, void *arg);
 extern int j1939rtnl_del_addr(struct sk_buff *, struct nlmsghdr *, void *arg);
 extern int j1939rtnl_dump_addr(struct sk_buff *, struct netlink_callback *);

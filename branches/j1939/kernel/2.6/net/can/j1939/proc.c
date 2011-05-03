@@ -90,15 +90,26 @@ EXPORT_SYMBOL(j1939_proc_remove);
 __init int j1939_proc_module_init(void)
 {
 	/* create /proc/net/can directory */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,24)
 	rootdir = proc_mkdir(j1939_procname, init_net.proc_net);
+#else
+	rootdir = proc_mkdir(j1939_procname, proc_net);
+#endif
 	if (!rootdir)
 		return -EINVAL;
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,30)
+	rootdir->owner = THIS_MODULE;
+#endif
 	return 0;
 }
 
 void j1939_proc_module_exit(void)
 {
 	if (rootdir)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,24)
 		proc_net_remove(&init_net, j1939_procname);
+#else
+		proc_net_remove(j1939_procname);
+#endif
 }
 

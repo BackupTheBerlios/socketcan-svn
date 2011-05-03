@@ -489,11 +489,82 @@ static int j1939_proc_ecu(struct seq_file *sqf, void *v)
 	return 0;
 }
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,36)
+static int j1939_proc_net(struct seq_file *sqf, void *v)
+{
+	struct j1939_segment *jseg;
+	struct net_device *netdev;
+
+	seq_printf(sqf, "ifindex\tiface\tid\n");
+	spin_lock_bh(&segments.lock);
+	list_for_each_entry(jseg, &segments.list, flist) {
+		get_j1939_segment(jseg);
+		netdev = dev_get_by_index(&init_net, jseg->ifindex);
+		if (!netdev) {
+			pr_alert("j1939 proc: ifindex %i not found\n",
+				jseg->ifindex);
+			put_j1939_segment(jseg);
+			continue;
+		}
+		seq_printf(sqf, "%i\t%s\n", jseg->ifindex,
+				netdev ? netdev->name : "!");
+		if (netdev)
+			dev_put(netdev);
+		put_j1939_segment(jseg);
+	}
+	spin_unlock_bh(&segments.lock);
+	return 0;
+}
+
+static int j1939_proc_wr_net(struct file *file, const char __user *buffer,
+		unsigned long count, void *data)
+{
+	int ret;
+	char *arg;
+	int opt;
+	struct net_device *netdev = NULL;
+	char buf[IFNAMSIZ+4];
+
+	if (!capable(CAP_NET_ADMIN))
+		return -EPERM;
+	if (count >= sizeof(buf))
+		return -EINVAL;
+	if (copy_from_user(buf, buffer, count))
+		return -EFAULT;
+	buf[count] = 0;
+	arg = strstrip(buf);
+
+	opt = '+';
+	if (strchr("+-~!", arg[0])) {
+		opt = arg[0];
+		++arg;
+	}
+	netdev = dev_get_by_name(&init_net, arg);
+	if (!netdev)
+		return -ENOENT;
+	if (strchr("+", opt))
+		ret = j1939_segment_attach(netdev);
+	else
+		ret = j1939_segment_detach(netdev);
+	if (ret < 0)
+		goto failed;
+	ret = count;
+
+failed:
+	if (netdev)
+		dev_put(netdev);
+	return ret;
+}
+#endif
+
 /* exported init */
 int __init j1939bus_module_init(void)
 {
 	INIT_LIST_HEAD(&segments.list);
 	spin_lock_init(&segments.lock);
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,36)
+	j1939_proc_add("net", j1939_proc_net, j1939_proc_wr_net);
+#endif
 	j1939_proc_add("addr", j1939_proc_addr, NULL);
 	j1939_proc_add("ecu", j1939_proc_ecu, NULL);
 	return 0;
@@ -518,6 +589,9 @@ void j1939bus_module_exit(void)
 
 	j1939_proc_remove("ecu");
 	j1939_proc_remove("addr");
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,36)
+	j1939_proc_remove("net");
+#endif
 }
 
 

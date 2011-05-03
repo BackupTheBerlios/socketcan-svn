@@ -544,8 +544,13 @@ static int j1939sk_setsockopt_flag(struct j1939_sock *jsk,
 	return tmp;
 }
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,32)
 static int j1939sk_setsockopt(struct socket *sock, int level, int optname,
 		char __user *optval, unsigned int optlen)
+#else
+static int j1939sk_setsockopt(struct socket *sock, int level, int optname,
+		char __user *optval, int optlen)
+#endif
 {
 	struct sock *sk = sock->sk;
 	struct j1939_sock *jsk = j1939_sk(sk);
@@ -554,6 +559,11 @@ static int j1939sk_setsockopt(struct socket *sock, int level, int optname,
 
 	if (level != SOL_CAN_J1939)
 		return -EINVAL;
+
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,32)
+	if (optlen < 0)
+		return -EINVAL;
+#endif
 
 	switch (optname) {
 	case SO_J1939_FILTER:
@@ -938,7 +948,9 @@ static struct can_proto j1939_can_proto = {
 	.ops = &j1939_ops,
 	.prot = &j1939_proto,
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,36)
 	.rtnl_link_ops = &j1939_rtnl_af_ops,
+#endif
 	.rtnl_new_addr = j1939rtnl_new_addr,
 	.rtnl_del_addr = j1939rtnl_del_addr,
 	.rtnl_dump_addr = j1939rtnl_dump_addr,

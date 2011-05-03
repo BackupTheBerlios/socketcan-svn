@@ -1090,6 +1090,7 @@ static int can_rtnl_dump_addr(struct sk_buff *skb, struct netlink_callback *cb)
 /*
  * LINK AF properties
  */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,36)
 static size_t can_get_link_af_size(const struct net_device *dev)
 {
 	int ret, j, total;
@@ -1218,6 +1219,7 @@ static struct rtnl_af_ops can_rtnl_af_ops = {
 	.validate_link_af = can_validate_link_af,
 	.set_link_af	  = can_set_link_af,
 };
+#endif
 
 /* exported init */
 
@@ -1259,7 +1261,9 @@ static __init int can_init(void)
 	register_netdevice_notifier(&can_netdev_notifier);
 	dev_add_pack(&can_packet);
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,36)
 	rtnl_af_register(&can_rtnl_af_ops);
+#endif
 	rtnl_register(PF_CAN, RTM_NEWADDR, can_rtnl_doit, NULL);
 	rtnl_register(PF_CAN, RTM_DELADDR, can_rtnl_doit, NULL);
 	rtnl_register(PF_CAN, RTM_GETADDR, NULL, can_rtnl_dump_addr);
@@ -1278,7 +1282,9 @@ static __exit void can_exit(void)
 	rtnl_unregister(PF_CAN, RTM_NEWADDR);
 	rtnl_unregister(PF_CAN, RTM_DELADDR);
 	rtnl_unregister(PF_CAN, RTM_GETADDR);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,36)
 	rtnl_af_unregister(&can_rtnl_af_ops);
+#endif
 
 	can_remove_proc();
 

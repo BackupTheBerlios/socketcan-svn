@@ -37,6 +37,7 @@ export CONFIG_CAN=m
 export CONFIG_CAN_RAW=m
 export CONFIG_CAN_BCM=m
 export CONFIG_CAN_ISOTP=m
+export CONFIG_CAN_J1939=m
 
 modules modules_install clean:
 	$(MAKE) -C $(KERNELDIR) M=$(PWD) $@ TOPDIR=$(TOPDIR)

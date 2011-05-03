@@ -381,8 +381,13 @@ static int j1939_notifier(struct notifier_block *nb,
 	struct net_device *netdev = (struct net_device *)data;
 	struct j1939_segment *jseg;
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,26)
 	if (!net_eq(dev_net(netdev), &init_net))
 		return NOTIFY_DONE;
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,24)
+	if (netdev->nd_net != &init_net)
+		return NOTIFY_DONE;
+#endif
 
 	if (netdev->type != ARPHRD_CAN)
 		return NOTIFY_DONE;

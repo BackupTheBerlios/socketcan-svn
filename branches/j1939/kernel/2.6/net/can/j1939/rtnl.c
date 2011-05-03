@@ -36,8 +36,10 @@ int j1939rtnl_del_addr(struct sk_buff *skb, struct nlmsghdr *nlh, void *arg)
 
 	struct nlattr *nla, *tb[IFA_J1939_MAX];
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,26)
 	if (!net_eq(sock_net(skb->sk), &init_net))
 		return -EINVAL;
+#endif
 
 	nla = nlmsg_find_attr(nlh, sizeof(*ifm), IFA_LOCAL);
 	if (!nla)
@@ -96,8 +98,10 @@ int j1939rtnl_new_addr(struct sk_buff *skb, struct nlmsghdr *nlh, void *arg)
 	int ret;
 	struct nlattr *nla, *tb[IFA_J1939_MAX];
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,26)
 	if (!net_eq(sock_net(skb->sk), &init_net))
 		return -EINVAL;
+#endif
 
 	nla = nlmsg_find_attr(nlh, sizeof(*ifm), IFA_LOCAL);
 	if (!nla)
@@ -180,8 +184,10 @@ int j1939rtnl_dump_addr(struct sk_buff *skb, struct netlink_callback *cb)
 	struct j1939_ecu *ecu;
 	struct addr_ent *ent;
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,26)
 	if (!net_eq(sock_net(skb->sk), &init_net))
 		return 0;
+#endif
 
 	ndev = 0;
 	for_each_netdev(&init_net, netdev) {
@@ -243,6 +249,7 @@ done:
 	return skb->len;
 }
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,36)
 /*
  * rtnl_link_ops
  */
@@ -305,4 +312,5 @@ const struct rtnl_af_ops j1939_rtnl_af_ops = {
 	.validate_link_af = j1939_validate_link_af,
 	.set_link_af	  = j1939_set_link_af,
 };
+#endif
 
