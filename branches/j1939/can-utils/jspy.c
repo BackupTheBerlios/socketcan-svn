@@ -135,10 +135,12 @@ int main(int argc, char **argv)
 		break;
 	}
 	if (argv[optind]) {
+		optarg = argv[optind];
 		ret = libj1939_str2addr(optarg, 0, &s.addr);
-		if (ret < 0)
+		if (ret < 0) {
 			error(0, 0, "bad URI %s", optarg);
 			return 1;
+		}
 	}
 
 	buf = malloc(s.pkt_len);
