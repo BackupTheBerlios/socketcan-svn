@@ -140,7 +140,7 @@ static void can_sock_destruct(struct sock *sk)
 #endif
 }
 
-static const struct can_proto *can_try_module_get(int protocol)
+static const struct can_proto *can_get_proto(int protocol)
 {
 	const struct can_proto *cp;
 
@@ -156,6 +156,15 @@ static const struct can_proto *can_try_module_get(int protocol)
 	rcu_read_unlock();
 
 	return cp;
+}
+
+static inline void can_put_proto(const struct can_proto *cp)
+{
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,12)
+	module_put(cp->prot->owner);
+#else
+	module_put(cp->owner);
+#endif
 }
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,33)
@@ -180,7 +189,7 @@ static int can_create(struct socket *sock, int protocol)
 		return -EAFNOSUPPORT;
 #endif
 
-	cp = can_try_module_get(protocol);
+	cp = can_get_proto(protocol);
 
 #ifdef CONFIG_MODULES
 	if (!cp) {
@@ -197,7 +206,7 @@ static int can_create(struct socket *sock, int protocol)
 			printk(KERN_ERR "can: request_module "
 			       "(can-proto-%d) failed.\n", protocol);
 
-		cp = can_try_module_get(protocol);
+		cp = can_get_proto(protocol);
 	}
 #endif
 
@@ -261,11 +270,7 @@ static int can_create(struct socket *sock, int protocol)
 	}
 
  errout:
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,12)
-	module_put(cp->prot->owner);
-#else
-	module_put(cp->owner);
-#endif
+	can_put_proto(cp);
 	return err;
 }
 
@@ -1032,7 +1037,7 @@ static int can_rtnl_doit(struct sk_buff *skb, struct nlmsghdr *nlh, void *arg)
 
 	protocol = ((struct rtgencanmsg *)NLMSG_DATA(nlh))->can_protocol;
 	/* since rtnl_lock is held, dont try to load protocol */
-	cp = can_try_module_get(protocol);
+	cp = can_get_proto(protocol);
 	if (!cp)
 		return -EPROTONOSUPPORT;
 
@@ -1051,7 +1056,7 @@ static int can_rtnl_doit(struct sk_buff *skb, struct nlmsghdr *nlh, void *arg)
 		ret = fn(skb, nlh, arg);
 	else
 		ret = -EPROTONOSUPPORT;
-	module_put(cp->prot->owner);
+	can_put_proto(cp);
 	return ret;
 }
 
@@ -1066,14 +1071,14 @@ static int can_rtnl_dumpit(struct sk_buff *skb, struct netlink_callback *cb,
 	for (j = cb->args[0]; j < CAN_NPROTO; ++j) {
 		/* save state */
 		cb->args[0] = j;
-		cp = can_try_module_get(j);
+		cp = can_get_proto(j);
 		if (!cp)
 			/* we are looping, any error is our own fault */
 			continue;
 		fn = *((rtnl_dumpit_func *)(&((const uint8_t *)cp)[offset]));
 		if (fn)
 			ret = fn(skb, cb);
-		module_put(cp->prot->owner);
+		can_put_proto(cp);
 		if (ret < 0)
 			/* suspend this skb */
 			return ret;
@@ -1101,7 +1106,7 @@ static size_t can_get_link_af_size(const struct net_device *dev)
 
 	total = 0;
 	for (j = 0; j < CAN_NPROTO; ++j) {
-		cp = can_try_module_get(j);
+		cp = can_get_proto(j);
 		if (!cp)
 			/* no worry */
 			continue;
@@ -1109,7 +1114,7 @@ static size_t can_get_link_af_size(const struct net_device *dev)
 		if (cp->rtnl_link_ops && cp->rtnl_link_ops->get_link_af_size)
 			ret = cp->rtnl_link_ops->get_link_af_size(dev) +
 				nla_total_size(sizeof(struct nlattr));
-		module_put(cp->prot->owner);
+		can_put_proto(cp);
 		if (ret < 0)
 			return ret;
 		total += ret;
@@ -1128,7 +1133,7 @@ static int can_fill_link_af(struct sk_buff *skb, const struct net_device *dev)
 
 	n = 0;
 	for (j = 0; j < CAN_NPROTO; ++j) {
-		cp = can_try_module_get(j);
+		cp = can_get_proto(j);
 		if (!cp)
 			/* no worry */
 			continue;
@@ -1151,13 +1156,13 @@ static int can_fill_link_af(struct sk_buff *skb, const struct net_device *dev)
 			nla_nest_end(skb, nla);
 			++n;
 		}
-		module_put(cp->prot->owner);
+		can_put_proto(cp);
 	}
 	return n ? 0 : -ENODATA;
 
 nla_put_failure:
 	nla_nest_cancel(skb, nla);
-	module_put(cp->prot->owner);
+	can_put_proto(cp);
 	return -EMSGSIZE;
 }
 
@@ -1172,7 +1177,7 @@ static int can_validate_link_af(const struct net_device *dev,
 		return -EPROTONOSUPPORT;
 
 	nla_for_each_nested(prot, nla, rem) {
-		cp = can_try_module_get(nla_type(prot));
+		cp = can_get_proto(nla_type(prot));
 		if (!cp)
 			return -EPROTONOSUPPORT;
 		if (!cp->rtnl_link_ops)
@@ -1181,7 +1186,7 @@ static int can_validate_link_af(const struct net_device *dev,
 			ret = 0;
 		else
 			ret = cp->rtnl_link_ops->validate_link_af(dev, prot);
-		module_put(cp->prot->owner);
+		can_put_proto(cp);
 		if (ret < 0)
 			return ret;
 	}
@@ -1198,14 +1203,14 @@ static int can_set_link_af(struct net_device *dev, const struct nlattr *nla)
 		return -EPROTONOSUPPORT;
 
 	nla_for_each_nested(prot, nla, rem) {
-		cp = can_try_module_get(nla_type(prot));
+		cp = can_get_proto(nla_type(prot));
 		if (!cp)
 			return -EPROTONOSUPPORT;
 		if (!cp->rtnl_link_ops || !cp->rtnl_link_ops->set_link_af)
 			ret = -EPROTONOSUPPORT;
 		else
 			ret = cp->rtnl_link_ops->set_link_af(dev, prot);
-		module_put(cp->prot->owner);
+		can_put_proto(cp);
 		if (ret < 0)
 			return ret;
 	}
