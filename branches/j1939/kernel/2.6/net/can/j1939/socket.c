@@ -942,7 +942,7 @@ static struct proto j1939_proto __read_mostly = {
 	.init = j1939sk_init,
 };
 
-static struct can_proto j1939_can_proto = {
+static const struct can_proto j1939_can_proto = {
 	.type = SOCK_DGRAM,
 	.protocol = CAN_J1939,
 	.ops = &j1939_ops,

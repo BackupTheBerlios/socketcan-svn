@@ -87,8 +87,8 @@ struct rtgencanmsg {
 
 /* function prototypes for the CAN networklayer core (af_can.c) */
 
-extern int  can_proto_register(struct can_proto *cp);
-extern void can_proto_unregister(struct can_proto *cp);
+extern int  can_proto_register(const struct can_proto *cp);
+extern void can_proto_unregister(const struct can_proto *cp);
 
 extern int  can_rx_register(struct net_device *dev, canid_t can_id,
 			    canid_t mask,
