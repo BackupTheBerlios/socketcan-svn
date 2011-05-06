@@ -140,7 +140,7 @@ int main(int argc, char **argv)
 
 		if (fstat(STDIN_FILENO, &st) < 0)
 			error(1, errno, "stat stdin, could not determine buffer size");
-		s.pkt_len = st.st_size;
+		s.pkt_len = st.st_size ?: 1024;
 	}
 
 	/* prepare */
