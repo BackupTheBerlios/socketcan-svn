@@ -205,7 +205,7 @@ int main(int argc, char **argv)
 			}
 		}
 		if (pfd[1].revents) {
-			ret = read(pfd[1].fd, buf, sizeof(buf));
+			ret = read(pfd[1].fd, buf, s.pkt_len);
 			if (ret < 0) {
 				ret = errno;
 				error(0, errno, "read(%s)", libj1939_addr2str(&s.dst));
