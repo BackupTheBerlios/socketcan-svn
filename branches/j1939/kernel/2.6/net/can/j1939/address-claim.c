@@ -173,7 +173,7 @@ static struct j1939_ecu *j1939_process_address_claim(struct sk_buff *skb)
 			 * schedule a timer soon now
 			 */
 			hrtimer_try_to_cancel(&dut->ac_timer);
-		if (dut->name > ecu->name)
+		if ((ecu->sa == dut->sa) && (dut->name > ecu->name))
 			dut->sa = J1939_IDLE_ADDR;
 	}
 

@@ -204,7 +204,7 @@ int j1939rtnl_dump_addr(struct sk_buff *skb, struct netlink_callback *cb)
 		read_lock_bh(&jseg->lock);
 		for (addr = cb->args[2]; addr < J1939_IDLE_ADDR; ++addr) {
 			ent = &jseg->ents[addr];
-			if (!ent->flags)
+			if (!(ent->flags & ECUFLAG_LOCAL))
 				continue;
 			ret = j1939rtnl_fill_ifaddr(skb, netdev->ifindex, addr,
 					0, ent->flags, NETLINK_CB(cb->skb).pid,
