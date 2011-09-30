@@ -31,6 +31,12 @@ test -x /sbin/modprobe || exit 0
 # The syntax for the CAN devices is: devname[@bitrate][,restart-ms]
 # example CAN_IF="can0 can1@500000 can2@500000,200 can3,500"
 CAN_IF=""
+
+# To modify the sampling-point and SJW settings for the in-kernel bittiming
+# calculation. "0" => set default values (CAN CIA sampling-point / sjw=1)
+SAMPOINT="0" # example for 84% : SAMPOINT=".840"
+SJW="0"      # example for max. sjw : SJW="4"
+
 VCAN_IF="vcan0 vcan1 vcan2 vcan3"
 PROBE="vcan"
 
@@ -54,7 +60,7 @@ case "$1" in
 			if [ -n "$HASBTR" ]; then
 				BITRATE=${IF#*@}
 				BITRATE=${BITRATE%,*}
-				/sbin/ip link set $DEVICE type can bitrate $BITRATE
+				/sbin/ip link set $DEVICE type can bitrate $BITRATE sample-point $SAMPOINT sjw $SJW
 			fi
 			HASMS=`echo $IF | grep ","` 
 			if [ -n "$HASMS" ]; then
